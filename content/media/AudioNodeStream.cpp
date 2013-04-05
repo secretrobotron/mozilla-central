@@ -190,15 +190,46 @@ AudioNodeStream::AllInputsFinished() const
 }
 
 AudioChunk*
-AudioNodeStream::ObtainInputBlock(AudioChunk* aTmpChunk)
+AudioNodeStream::ObtainInputBlock(AudioChunk* aTmpChunk, GraphTime aFrom, GraphTime aTo)
 {
   uint32_t inputCount = mInputs.Length();
   uint32_t outputChannelCount = mNumberOfInputChannels;
   nsAutoTArray<AudioChunk*,250> inputChunks;
   for (uint32_t i = 0; i < inputCount; ++i) {
     MediaStream* s = mInputs[i]->GetSource();
-    AudioNodeStream* a = static_cast<AudioNodeStream*>(s);
-    MOZ_ASSERT(a == s->AsAudioNodeStream());
+    AudioNodeStream* a = s->AsAudioNodeStream();
+    if (!a) {
+      StreamTime from = s->GraphTimeToStreamTime(aFrom);
+      StreamTime to = s->GraphTimeToStreamTime(aTo);
+
+      AudioSegment inputSegment;
+
+      for (StreamBuffer::TrackIter tracks(s->mBuffer, MediaSegment::AUDIO);
+       !tracks.IsEnded(); tracks.Next()) {
+        AudioSegment* audio  = tracks->Get<AudioSegment>();
+        inputSegment.AppendSlice(*audio, from, to);
+        AudioSegment::ChunkIterator chunkIter(inputSegment);
+        while (!chunkIter.IsEnded()) {
+          inputChunks.AppendElement(*chunkIter);
+        }
+      }
+      //  VideoSegment* segment = tracks->Get<VideoSegment>();
+
+
+      // AudioSegment inputSegment;
+      // for (uint32_t i = 0; i < s->mAudioOutputStreams.Length(); ++i) {
+      //   MediaStream::AudioOutputStream& audioOutput = s->mAudioOutputStreams[i];
+      //   StreamBuffer::Track* track = s->mBuffer.FindTrack(audioOutput.mTrackID);
+      //   AudioSegment* audio  = track->Get<AudioSegment>();
+
+      //   inputSegment.AppendSlice(*audio, from, to);
+      // 	AudioSegment::ChunkIterator iter(inputSegment);
+      // 	while (!iter.IsEnded()) {
+      //     inputChunks.AppendElement(*iter);
+      // 	}
+      // }
+      break;
+    }
     if (a->IsFinishedOnGraphThread()) {
       continue;
     }
@@ -229,7 +260,7 @@ AudioNodeStream::ObtainInputBlock(AudioChunk* aTmpChunk)
   AllocateAudioBlock(outputChannelCount, aTmpChunk);
 
   for (uint32_t i = 0; i < inputChunkCount; ++i) {
-    AudioChunk* chunk = inputChunks[i];
+    AudioChunk* chunk = &inputChunks[i];
     nsAutoTArray<const void*,GUESS_AUDIO_CHANNELS> channels;
     channels.AppendElements(chunk->mChannelData);
     if (channels.Length() < outputChannelCount) {
@@ -290,7 +321,7 @@ AudioNodeStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
     outputChunk.SetNull(WEBAUDIO_BLOCK_SIZE);
   } else {
     AudioChunk tmpChunk;
-    AudioChunk* inputChunk = ObtainInputBlock(&tmpChunk);
+    AudioChunk* inputChunk = ObtainInputBlock(&tmpChunk, aFrom, aTo);
     bool finished = false;
     mEngine->ProduceAudioBlock(this, *inputChunk, &outputChunk, &finished);
     if (finished) {

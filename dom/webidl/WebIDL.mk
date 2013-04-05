@@ -157,6 +157,7 @@ webidl_files = \
   Location.webidl \
   MediaError.webidl \
   MediaStream.webidl \
+  MediaStreamAudioSourceNode.webidl \
   MessageEvent.webidl \
   MouseEvent.webidl \
   MouseScrollEvent.webidl \

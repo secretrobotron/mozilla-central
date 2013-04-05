@@ -55,7 +55,7 @@ public:
   virtual JSObject* WrapObject(JSContext* aCx, JSObject* aScope) MOZ_OVERRIDE;
 
   double CurrentTime();
-  MediaStream* GetStream() { return mStream; }
+  MediaStream* GetStream() const { return mStream; }
   bool IsFinished();
   /**
    * Returns a principal indicating who may access this stream. The stream contents

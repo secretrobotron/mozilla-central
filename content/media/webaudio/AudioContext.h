@@ -47,6 +47,7 @@ class DelayNode;
 class DynamicsCompressorNode;
 class GainNode;
 class GlobalObject;
+class MediaStreamAudioSourceNode;
 class PannerNode;
 class ScriptProcessorNode;
 
@@ -122,6 +123,9 @@ public:
   {
     return CreateGain();
   }
+
+  already_AddRefed<MediaStreamAudioSourceNode>
+  CreateMediaStreamSource(const DOMMediaStream& aMediaStream);
 
   already_AddRefed<DelayNode>
   CreateDelay(double aMaxDelayTime, ErrorResult& aRv);

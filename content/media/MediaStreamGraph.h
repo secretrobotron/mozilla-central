@@ -20,6 +20,7 @@
 namespace mozilla {
 
 class DOMMediaStream;
+class AudioNodeStream;
 
 #ifdef PR_LOGGING
 extern PRLogModuleInfo* gMediaStreamGraphLog;
@@ -354,6 +355,7 @@ public:
 
   friend class MediaStreamGraphImpl;
   friend class MediaInputPort;
+  friend class AudioNodeStream;
 
   virtual SourceMediaStream* AsSourceStream() { return nullptr; }
   virtual ProcessedMediaStream* AsProcessedStream() { return nullptr; }

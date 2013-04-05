@@ -43,6 +43,8 @@ interface AudioContext {
     [Creator]
     AnalyserNode createAnalyser();
     [Creator]
+    MediaStreamAudioSourceNode createMediaStreamSource(MediaStream mediaStream);
+    [Creator]
     GainNode createGain();
     [Creator, Throws]
     DelayNode createDelay(optional double maxDelayTime = 1);

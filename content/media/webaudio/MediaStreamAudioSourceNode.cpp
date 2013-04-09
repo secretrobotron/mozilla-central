@@ -8,6 +8,7 @@
 #include "mozilla/dom/MediaStreamAudioSourceNodeBinding.h"
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
+#include "AudioNodeExternalInputStream.h"
 #include "AudioDestinationNode.h"
 #include "WebAudioUtils.h"
 #include "DOMMediaStream.h"
@@ -17,11 +18,12 @@ namespace dom {
 
 NS_IMPL_ISUPPORTS_INHERITED0(MediaStreamAudioSourceNode, AudioNode)
 
-MediaStreamAudioSourceNode::MediaStreamAudioSourceNode(AudioContext* aContext, const DOMMediaStream* aMediaStream)
+MediaStreamAudioSourceNode::MediaStreamAudioSourceNode(AudioContext* aContext,
+                                                       const DOMMediaStream* aMediaStream)
   : AudioNode(aContext)
 {
   AudioNodeEngine* engine = new AudioNodeEngine();
-  mStream = aContext->Graph()->CreateAudioNodeStream(engine, MediaStreamGraph::INTERNAL_STREAM);
+  mStream = aContext->Graph()->CreateAudioNodeExternalInputStream(engine, MediaStreamGraph::INTERNAL_STREAM);
   ProcessedMediaStream* outputStream = static_cast<ProcessedMediaStream*>(mStream.get());
   MediaStream* inputStream = aMediaStream->GetStream();
   mInputPort = outputStream->AllocateInputPort(inputStream);

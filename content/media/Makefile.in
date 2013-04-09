@@ -19,6 +19,7 @@ CPPSRCS = \
   AudioChannelFormat.cpp \
   AudioNodeEngine.cpp \
   AudioNodeStream.cpp \
+  AudioNodeExternalInputStream.cpp \
   AudioSegment.cpp \
   AudioStream.cpp \
   DecoderTraits.cpp \

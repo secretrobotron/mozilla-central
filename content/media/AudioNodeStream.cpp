@@ -290,7 +290,7 @@ AudioNodeStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
     outputChunk.SetNull(WEBAUDIO_BLOCK_SIZE);
   } else {
     AudioChunk tmpChunk;
-    AudioChunk* inputChunk = ObtainInputBlock(&tmpChunk, aFrom, aTo);
+    AudioChunk* inputChunk = ObtainInputBlock(&tmpChunk);
     bool finished = false;
     mEngine->ProduceAudioBlock(this, *inputChunk, &outputChunk, &finished);
     if (finished) {

@@ -85,7 +85,7 @@ protected:
   void FinishOutput();
 
   StreamBuffer::Track* EnsureTrack();
-  AudioChunk* ObtainInputBlock(AudioChunk* aTmpChunk, TrackTicks aFrom, TrackTicks aTo);
+  AudioChunk* ObtainInputBlock(AudioChunk* aTmpChunk);
 
   // The engine that will generate output for this node.
   nsAutoPtr<AudioNodeEngine> mEngine;

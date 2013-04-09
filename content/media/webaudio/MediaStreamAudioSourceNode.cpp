@@ -7,7 +7,6 @@
 #include "MediaStreamAudioSourceNode.h"
 #include "mozilla/dom/MediaStreamAudioSourceNodeBinding.h"
 #include "AudioNodeEngine.h"
-#include "AudioNodeStream.h"
 #include "AudioNodeExternalInputStream.h"
 #include "AudioDestinationNode.h"
 #include "WebAudioUtils.h"
@@ -23,10 +22,12 @@ MediaStreamAudioSourceNode::MediaStreamAudioSourceNode(AudioContext* aContext,
   : AudioNode(aContext)
 {
   AudioNodeEngine* engine = new AudioNodeEngine();
-  mStream = aContext->Graph()->CreateAudioNodeExternalInputStream(engine, MediaStreamGraph::INTERNAL_STREAM);
+  MediaStream* externalStream = aMediaStream->GetStream();
+  mStream = aContext->Graph()->CreateAudioNodeExternalInputStream(engine,
+                                                                  MediaStreamGraph::INTERNAL_STREAM,
+                                                                  externalStream);
   ProcessedMediaStream* outputStream = static_cast<ProcessedMediaStream*>(mStream.get());
-  MediaStream* inputStream = aMediaStream->GetStream();
-  mInputPort = outputStream->AllocateInputPort(inputStream);
+  mInputPort = outputStream->AllocateInputPort(externalStream);
 }
 
 MediaStreamAudioSourceNode::~MediaStreamAudioSourceNode()

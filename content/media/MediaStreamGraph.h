@@ -193,7 +193,6 @@ class MediaStreamGraphImpl;
 class SourceMediaStream;
 class ProcessedMediaStream;
 class MediaInputPort;
-class AudioNodeStream;
 class AudioNodeEngine;
 struct AudioChunk;
 
@@ -916,7 +915,8 @@ public:
                                          uint32_t aNumberOfInputChannels = 0);
   AudioNodeExternalInputStream*
   CreateAudioNodeExternalInputStream(AudioNodeEngine* aEngine,
-                                     AudioNodeStreamKind aKind);
+                                     AudioNodeStreamKind aKind,
+                                     MediaStream* aExternalStream);
   /**
    * Returns the number of graph updates sent. This can be used to track
    * whether a given update has been processed by the graph thread and reflected

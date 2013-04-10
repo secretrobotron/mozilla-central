@@ -356,6 +356,7 @@ public:
   friend class MediaStreamGraphImpl;
   friend class MediaInputPort;
   friend class AudioNodeStream;
+  friend class AudioNodeExternalInputStream;
 
   virtual SourceMediaStream* AsSourceStream() { return nullptr; }
   virtual ProcessedMediaStream* AsProcessedStream() { return nullptr; }

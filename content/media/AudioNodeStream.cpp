@@ -278,10 +278,7 @@ AudioNodeStream::ObtainInputBlock(AudioChunk* aTmpChunk)
 void
 AudioNodeStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
 {
-  StreamBuffer::Track* track = EnsureTrack();
-
   AudioChunk outputChunk;
-  AudioSegment* segment = track->Get<AudioSegment>();
 
   outputChunk.SetNull(0);
 
@@ -299,21 +296,30 @@ AudioNodeStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
   }
 
   mLastChunk = outputChunk;
+  FinalizeProducedOutput(&outputChunk);
+}
+
+void
+AudioNodeStream::FinalizeProducedOutput(AudioChunk* outputChunk)
+{
+  StreamBuffer::Track* track = EnsureTrack();
+  AudioSegment* segment = track->Get<AudioSegment>();
+
   if (mKind == MediaStreamGraph::EXTERNAL_STREAM) {
-    segment->AppendAndConsumeChunk(&outputChunk);
+    segment->AppendAndConsumeChunk(outputChunk);
   } else {
-    segment->AppendNullData(outputChunk.GetDuration());
+    segment->AppendNullData(outputChunk->GetDuration());
   }
 
   for (uint32_t j = 0; j < mListeners.Length(); ++j) {
     MediaStreamListener* l = mListeners[j];
-    AudioChunk copyChunk = outputChunk;
+    AudioChunk copyChunk = *outputChunk;
     AudioSegment tmpSegment;
     tmpSegment.AppendAndConsumeChunk(&copyChunk);
     l->NotifyQueuedTrackChanges(Graph(), AUDIO_NODE_STREAM_TRACK_ID,
                                 IdealAudioRate(), segment->GetDuration(), 0,
                                 tmpSegment);
-  }
+  }  
 }
 
 TrackTicks

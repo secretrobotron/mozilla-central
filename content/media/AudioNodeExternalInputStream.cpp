@@ -23,14 +23,11 @@ AudioNodeExternalInputStream::~AudioNodeExternalInputStream()
   MOZ_COUNT_DTOR(AudioNodeExternalInputStream);
 }
 
+uint32_t bloop = 0;
+
 void
 AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
 {
-  // uint32_t outputChannels = 0;
-
-  StreamBuffer::Track* track = EnsureTrack();
-  AudioSegment* segment = track->Get<AudioSegment>();
-
   AudioChunk outputChunk;
   outputChunk.SetNull(WEBAUDIO_BLOCK_SIZE);
 
@@ -40,17 +37,17 @@ AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
   StreamTime to = mExternalStream->GraphTimeToStreamTime(aTo);
 
   if (from < to) {
-    for (StreamBuffer::TrackIter tracks(mExternalStream->mBuffer);
+    for (StreamBuffer::TrackIter tracks(mExternalStream->mBuffer, MediaSegment::AUDIO);
          !tracks.IsEnded(); tracks.Next()) {
       
-      StreamBuffer::Track& track = *tracks;
+      StreamBuffer::Track& externalTrack = *tracks;
 
-      TrackRate rate = track.GetRate();
+      TrackRate rate = externalTrack.GetRate();
 
       TrackTicks startTicks = TimeToTicksRoundUp(rate, from);
       TrackTicks endTicks = TimeToTicksRoundUp(rate, to);
 
-      AudioSegment* externalSegment = track.Get<AudioSegment>();
+      AudioSegment* externalSegment = externalTrack.Get<AudioSegment>();
       outputSegment.AppendSlice(*externalSegment, startTicks, endTicks);
 
       for (AudioSegment::ChunkIterator chunks(outputSegment);
@@ -64,7 +61,7 @@ AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
           }
           for (uint32_t c = 0; c < externalChunk.mChannelData.Length(); ++c) {
             AudioBlockAddChannelWithScale((float*)(externalChunk.mChannelData[c]),
-                                          1.0f,
+                                          externalChunk.mVolume,
                                           (float*)(outputChunk.mChannelData[c]));
           }
         }
@@ -73,22 +70,7 @@ AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
   }
 
   mLastChunk = outputChunk;
-  
-  if (mKind == MediaStreamGraph::EXTERNAL_STREAM) {
-    segment->AppendAndConsumeChunk(&outputChunk);
-  } else {
-    segment->AppendNullData(outputChunk.GetDuration());
-  }
-
-  for (uint32_t j = 0; j < mListeners.Length(); ++j) {
-    MediaStreamListener* l = mListeners[j];
-    AudioChunk copyChunk = outputChunk;
-    AudioSegment tmpSegment;
-    tmpSegment.AppendAndConsumeChunk(&copyChunk);
-    l->NotifyQueuedTrackChanges(Graph(), AUDIO_NODE_STREAM_TRACK_ID,
-                                IdealAudioRate(), segment->GetDuration(), 0,
-                                tmpSegment);
-  }
+  FinalizeProducedOutput(&outputChunk);
 }
 
 }

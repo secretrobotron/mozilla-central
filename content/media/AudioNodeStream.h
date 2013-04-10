@@ -84,6 +84,8 @@ public:
 protected:
   void FinishOutput();
 
+  void FinalizeProducedOutput(AudioChunk* outputChunk);
+
   StreamBuffer::Track* EnsureTrack();
   AudioChunk* ObtainInputBlock(AudioChunk* aTmpChunk);
 

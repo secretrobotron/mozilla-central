@@ -58,9 +58,10 @@ AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
             WriteZeroesToAudioBlock(&outputChunk, 0, WEBAUDIO_BLOCK_SIZE);
           }
           for (uint32_t c = 0; c < externalChunk.mChannelData.Length(); ++c) {
-            AudioBlockAddChannelWithScale((float*)(externalChunk.mChannelData[c]),
-                                          externalChunk.mVolume,
-                                          (float*)(outputChunk.mChannelData[c]));
+            AudioBlockAddChannelWithScale(
+              static_cast<float*>(const_cast<void*>(externalChunk.mChannelData[c])),
+              externalChunk.mVolume,
+              static_cast<float*>(const_cast<void*>(outputChunk.mChannelData[c])));
           }
         }
       }

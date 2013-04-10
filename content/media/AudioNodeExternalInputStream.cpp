@@ -34,93 +34,43 @@ AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
   AudioChunk outputChunk;
   outputChunk.SetNull(WEBAUDIO_BLOCK_SIZE);
 
-  // AudioSegment* inputSegment;
+  AudioSegment outputSegment;
 
-  // StreamTime from = mExternalStream->GraphTimeToStreamTime(aFrom);
-  // StreamTime to = mExternalStream->GraphTimeToStreamTime(aTo);
+  StreamTime from = mExternalStream->GraphTimeToStreamTime(aFrom);
+  StreamTime to = mExternalStream->GraphTimeToStreamTime(aTo);
 
-  // mExternalStream->mBuffer.FindTrack(2)->mSegment
+  if (from < to) {
+    for (StreamBuffer::TrackIter tracks(mExternalStream->mBuffer);
+         !tracks.IsEnded(); tracks.Next()) {
+      
+      StreamBuffer::Track& track = *tracks;
 
-  for (StreamBuffer::TrackIter tracks(mExternalStream->mBuffer);
-       !tracks.IsEnded(); tracks.Next()) {
-    StreamBuffer::Track& track = *tracks;
-    AudioSegment* externalSegment = track.Get<AudioSegment>();
-    for (AudioSegment::ChunkIterator chunks(*externalSegment);
-         !chunks.IsEnded(); chunks.Next()) {
-      AudioChunk& externalChunk = *chunks;
-      if (!externalChunk.IsNull()) {
+      TrackRate rate = track.GetRate();
 
-        if (outputChunk.IsNull()) {
-          AllocateAudioBlock(externalChunk.mChannelData.Length(), &outputChunk);
-          WriteZeroesToAudioBlock(&outputChunk, 0, WEBAUDIO_BLOCK_SIZE);
-        }
-        for (uint32_t c = 0; c < externalChunk.mChannelData.Length(); ++c) {
-          AudioBlockAddChannelWithScale((float*)(externalChunk.mChannelData[c]),
-                                        1.0f,
-                                        (float*)(outputChunk.mChannelData[c]));
+      TrackTicks startTicks = TimeToTicksRoundUp(rate, from);
+      TrackTicks endTicks = TimeToTicksRoundUp(rate, to);
+
+      AudioSegment* externalSegment = track.Get<AudioSegment>();
+      outputSegment.AppendSlice(*externalSegment, startTicks, endTicks);
+
+      for (AudioSegment::ChunkIterator chunks(outputSegment);
+           !chunks.IsEnded(); chunks.Next()) {
+        AudioChunk& externalChunk = *chunks;
+        if (!externalChunk.IsNull()) {
+
+          if (outputChunk.IsNull()) {
+            AllocateAudioBlock(externalChunk.mChannelData.Length(), &outputChunk);
+            WriteZeroesToAudioBlock(&outputChunk, 0, WEBAUDIO_BLOCK_SIZE);
+          }
+          for (uint32_t c = 0; c < externalChunk.mChannelData.Length(); ++c) {
+            AudioBlockAddChannelWithScale((float*)(externalChunk.mChannelData[c]),
+                                          1.0f,
+                                          (float*)(outputChunk.mChannelData[c]));
+          }
         }
       }
     }
   }
-
-
-  // for (StreamBuffer::TrackIter tracks(mExternalStream->mBuffer, MediaSegment::AUDIO);
-  //  !tracks.IsEnded(); tracks.Next()) {
-  //   AudioSegment* audio = tracks->Get<AudioSegment>();
-  //   AudioSegment::ChunkIterator chunkIter(*audio);
-
-  //   while (!chunkIter.IsEnded()) {
-  //     AudioChunk& inputChunk = *chunkIter;
-
-  //     if (inputChunk.IsNull()) {
-  //       continue;
-  //     }
-
-  //     if (outputChannels == 0) {
-  //       AllocateAudioBlock(inputChunk.mChannelData.Length(), &outputChunk);
-  //     }
-  //     break;
-  //   }
-
-  //   // inputSegment.AppendSlice(*audio, from, to);
-  //   break;
-  // }
-
-
-// +    AudioNodeStream* a = s->AsAudioNodeStream();^M
-// +    if (!a) {^M
-// +      StreamTime from = s->GraphTimeToStreamTime(aFrom);^M
-// +      StreamTime to = s->GraphTimeToStreamTime(aTo);^M
-// +^M
-// +      AudioSegment inputSegment;^M
-// +^M
-// +      for (StreamBuffer::TrackIter tracks(s->mBuffer, MediaSegment::AUDIO);^M
-// +       !tracks.IsEnded(); tracks.Next()) {^M
-// +        AudioSegment* audio  = tracks->Get<AudioSegment>();^M
-// +        inputSegment.AppendSlice(*audio, from, to);^M
-// +        AudioSegment::ChunkIterator chunkIter(inputSegment);^M
-// +        while (!chunkIter.IsEnded()) {^M
-// +          inputChunks.AppendElement(*chunkIter);^M
-// +        }^M
-// +      }^M
-// +^M
-// +^M
-// +      // AudioSegment inputSegment;^M
-// +      // for (uint32_t i = 0; i < s->mAudioOutputStreams.Length(); ++i) {^M
-// +      //   MediaStream::AudioOutputStream& audioOutput = s->mAudioOutputStreams[i];^M
-// +      //   StreamBuffer::Track* track = s->mBuffer.FindTrack(audioOutput.mTrackID);^M
-// +      //   AudioSegment* audio  = track->Get<AudioSegment>();^M
-// +^M
-// +      //   inputSegment.AppendSlice(*audio, from, to);^M
-// +      //       AudioSegment::ChunkIterator iter(inputSegment);^M
-// +      //       while (!iter.IsEnded()) {^M
-// +      //     inputChunks.AppendElement(*iter);^M
-// +      //       }^M
-// +      // }^M
-// +      break;^M
-
-
-
 
   mLastChunk = outputChunk;
   

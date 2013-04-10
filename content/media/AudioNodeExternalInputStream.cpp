@@ -23,8 +23,6 @@ AudioNodeExternalInputStream::~AudioNodeExternalInputStream()
   MOZ_COUNT_DTOR(AudioNodeExternalInputStream);
 }
 
-uint32_t bloop = 0;
-
 void
 AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
 {

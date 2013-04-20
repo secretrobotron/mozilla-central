@@ -27,18 +27,13 @@ public:
    * Transfers ownership of aEngine to the new AudioNodeExternalInputStream.
    */
   AudioNodeExternalInputStream(AudioNodeEngine* aEngine,
-                               MediaStreamGraph::AudioNodeStreamKind aKind,
-                               MediaStream* aExternalStream)
+                               MediaStreamGraph::AudioNodeStreamKind aKind)
     : AudioNodeStream(aEngine, aKind)
-    , mExternalStream(aExternalStream)
   {
   }
   ~AudioNodeExternalInputStream();
 
   virtual void ProduceOutput(GraphTime aFrom, GraphTime aTo);
-
-private:
-  MediaStream* mExternalStream;
 };
 
 }

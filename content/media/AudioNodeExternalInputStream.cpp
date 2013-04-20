@@ -6,6 +6,7 @@
 #include "MediaStreamGraphImpl.h"
 #include "AudioNodeEngine.h"
 #include "AudioNodeExternalInputStream.h"
+#include "speex/speex_resampler.h"
 
 using namespace mozilla::dom;
 
@@ -31,42 +32,94 @@ AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
 
   AudioSegment outputSegment;
 
-  StreamTime from = mExternalStream->GraphTimeToStreamTime(aFrom);
-  StreamTime to = mExternalStream->GraphTimeToStreamTime(aTo);
+  MOZ_ASSERT(mInputs.Length() == 1);
 
-  if (from < to) {
-    for (StreamBuffer::TrackIter tracks(mExternalStream->mBuffer, MediaSegment::AUDIO);
-         !tracks.IsEnded(); tracks.Next()) {
-      
-      StreamBuffer::Track& externalTrack = *tracks;
+  MediaInputPort* inputPort = mInputs[0];
+  MediaStream* inputStream = inputPort->GetSource();
 
-      TrackRate rate = externalTrack.GetRate();
+  StreamTime from = inputStream->GraphTimeToStreamTime(aFrom);
+  StreamTime to = inputStream->GraphTimeToStreamTime(aTo);
 
-      TrackTicks startTicks = TimeToTicksRoundUp(rate, from);
-      TrackTicks endTicks = TimeToTicksRoundUp(rate, to);
+  GraphTime next;
 
-      AudioSegment* externalSegment = externalTrack.Get<AudioSegment>();
-      outputSegment.AppendSlice(*externalSegment, startTicks, endTicks);
+  for (StreamBuffer::TrackIter tracks(inputStream->mBuffer, MediaSegment::AUDIO);
+       !tracks.IsEnded(); tracks.Next()) {
+    
+    StreamBuffer::Track& inputTrack = *tracks;
 
-      for (AudioSegment::ChunkIterator chunks(outputSegment);
-           !chunks.IsEnded(); chunks.Next()) {
-        AudioChunk& externalChunk = *chunks;
-        if (!externalChunk.IsNull()) {
+    for (GraphTime t = aFrom; t < aTo; t = next) {
+      MediaInputPort::InputInterval interval = inputPort->GetNextInputInterval(t);
+      interval.mEnd = std::min(interval.mEnd, aTo);
+      if (interval.mStart >= interval.mEnd)
+        break;
+      next = interval.mEnd;
 
-          if (outputChunk.IsNull()) {
-            AllocateAudioBlock(externalChunk.mChannelData.Length(), &outputChunk);
-            WriteZeroesToAudioBlock(&outputChunk, 0, WEBAUDIO_BLOCK_SIZE);
-          }
-          for (uint32_t c = 0; c < externalChunk.mChannelData.Length(); ++c) {
-            AudioBlockAddChannelWithScale(
-              static_cast<float*>(const_cast<void*>(externalChunk.mChannelData[c])),
-              externalChunk.mVolume,
-              static_cast<float*>(const_cast<void*>(outputChunk.mChannelData[c])));
-          }
+      TrackRate rate = inputTrack.GetRate();
+      TrackTicks startTicks = TimeToTicksRoundDown(rate, from);
+      TrackTicks endTicks = TimeToTicksRoundDown(rate, to);
+      TrackTicks ticks = endTicks - startTicks;
+
+      StreamTime inputEnd = inputStream->GraphTimeToStreamTime(interval.mEnd);
+      TrackTicks inputTrackEndPoint = TRACK_TICKS_MAX;
+
+      if (inputTrack.IsEnded()) {
+        TrackTicks inputEndTicks = inputTrack.TimeToTicksRoundDown(inputEnd);
+        if (inputTrack.GetEnd() <= inputEndTicks) {
+          inputTrackEndPoint = inputTrack.GetEnd();
+          // *aOutputTrackFinished = true;
         }
       }
+
+      if (interval.mInputIsBlocked) {
+        // Maybe the input track ended?
+        outputSegment.AppendNullData(ticks);
+      }
+      else {
+        TrackTicks inputEndTicks = TimeToTicksRoundUp(rate, inputEnd);
+        TrackTicks inputStartTicks = inputEndTicks - ticks;
+        outputSegment.AppendSlice(*inputTrack.GetSegment(),
+                             std::min(inputTrackEndPoint, inputStartTicks),
+                             std::min(inputTrackEndPoint, inputEndTicks));
+
+      }
+
     }
   }
+
+  // if (from < to) {
+  //   for (StreamBuffer::TrackIter tracks(mExternalStream->mBuffer, MediaSegment::AUDIO);
+  //        !tracks.IsEnded(); tracks.Next()) {
+      
+  //     StreamBuffer::Track& externalTrack = *tracks;
+
+  //     TrackRate rate = externalTrack.GetRate();
+
+  //     TrackTicks startTicks = TimeToTicksRoundDown(rate, from);
+  //     TrackTicks endTicks = TimeToTicksRoundDown(rate, to);
+  //     printf("Consuming %lld samples\n", endTicks - startTicks);
+
+  //     AudioSegment* externalSegment = externalTrack.Get<AudioSegment>();
+  //     outputSegment.AppendSlice(*externalSegment, startTicks, endTicks);
+
+  //     for (AudioSegment::ChunkIterator chunks(outputSegment);
+  //          !chunks.IsEnded(); chunks.Next()) {
+  //       AudioChunk& externalChunk = *chunks;
+  //       if (!externalChunk.IsNull()) {
+
+  //         if (outputChunk.IsNull()) {
+  //           AllocateAudioBlock(externalChunk.mChannelData.Length(), &outputChunk);
+  //           WriteZeroesToAudioBlock(&outputChunk, 0, WEBAUDIO_BLOCK_SIZE);
+  //         }
+  //         for (uint32_t c = 0; c < externalChunk.mChannelData.Length(); ++c) {
+  //           AudioBlockAddChannelWithScale(
+  //             static_cast<float*>(const_cast<void*>(externalChunk.mChannelData[c])),
+  //             externalChunk.mVolume,
+  //             static_cast<float*>(const_cast<void*>(outputChunk.mChannelData[c])));
+  //         }
+  //       }
+  //     }
+  //   }
+  // }
 
   mLastChunk = outputChunk;
   FinalizeProducedOutput(&outputChunk);

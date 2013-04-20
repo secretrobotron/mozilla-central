@@ -864,6 +864,7 @@ BufferedAudioStream::DataCallback(void* aBuffer, long aFrames)
     memset(rpos, 0, FramesToBytes(underrunFrames));
 #ifdef PR_LOGGING
     if (underrunFrames) {
+      printf("undderrun of %d frames\n", underrunFrames);
       PR_LOG(gAudioStreamLog, PR_LOG_WARNING,
              ("AudioStream %p lost %d frames", this, underrunFrames));
     }

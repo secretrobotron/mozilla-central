@@ -1,0 +1,25 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+  <title>Test MediaStreamAudioSourceNode</title>
+  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
+</head>
+<body>
+  <audio src="sin440-48k.wav" controls></audio>
+  
+  <script type="text/javascript">
+    var context = new AudioContext();
+
+    var audio = document.querySelector('audio');
+
+    audio.oncanplay = function (e) {
+      var stream = audio.mozCaptureStream();
+      var source = context.createMediaStreamSource(stream);
+      source.connect(context.destination);
+      audio.play();
+    };
+
+    audio.load();
+  </script>
+</body>
+</html>

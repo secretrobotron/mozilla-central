@@ -28,7 +28,7 @@ public:
     return true;
   }
 
-  virtual uint32_t NumberOfOutputs() const MOZ_FINAL MOZ_OVERRIDE
+  virtual uint32_t NumberOfInputs() const MOZ_FINAL MOZ_OVERRIDE
   {
     return 1;
   }

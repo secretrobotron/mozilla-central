@@ -48,6 +48,7 @@ EXPORTS += [
     'AudioChannelFormat.h',
     'AudioEventTimeline.h',
     'AudioNodeEngine.h',
+    'AudioNodeExternalInputStream.h',
     'AudioNodeStream.h',
     'AudioSampleFormat.h',
     'AudioSegment.h',

@@ -1,0 +1,28 @@
+<!DOCTYPE HTML>
+<html>
+<meta charset="UTF-8">
+<head>
+  <title>Test the createBuffer API</title>
+</head>
+<body>
+<script class="testbody" type="text/javascript">
+
+function runTest() {
+  var xhr = new XMLHttpRequest();
+  xhr.open("GET", "ting.ogg", true);
+  xhr.responseType = "arraybuffer";
+  xhr.onload = function() {
+    console.log(xhr.response);
+    cx.createBuffer(xhr.response, false);
+  };
+  xhr.send();
+}
+
+var cx = new AudioContext();
+
+runTest();
+
+</script>
+</pre>
+</body>
+</html>

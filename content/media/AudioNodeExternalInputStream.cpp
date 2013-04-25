@@ -19,9 +19,45 @@ namespace mozilla {
  */
 static const int AUDIO_NODE_STREAM_TRACK_ID = 1;
 
+AudioNodeExternalInputStream::AudioNodeExternalInputStream(AudioNodeEngine* aEngine,
+                                                           MediaStreamGraph::AudioNodeStreamKind aKind,
+                                                           uint32_t aNumberOfInputChannels)
+  : AudioNodeStream(aEngine, aKind, aNumberOfInputChannels)
+{
+}
+
+
 AudioNodeExternalInputStream::~AudioNodeExternalInputStream()
 {
   MOZ_COUNT_DTOR(AudioNodeExternalInputStream);
+  for (uint32_t i = 0; i < mResamplerMap.Length(); ++i) {
+    speex_resampler_destroy(mResamplerMap[i].mResampler);  
+  }
+}
+
+SpeexResamplerState*
+AudioNodeExternalInputStream::GetTrackResampler(StreamBuffer::Track* aTrack)
+{
+  SpeexResamplerState* resampler;
+  ResamplerMapEntry* map;
+
+  for (uint32_t i = 0; i < mResamplerMap.Length(); ++i) {
+    map = &mResamplerMap[i];
+    if (map->mTrackID == aTrack->GetID()) {
+      return map->mResampler;
+    }
+  }
+
+  resampler = speex_resampler_init(mNumberOfInputChannels,
+                                   aTrack->GetRate(),
+                                   IdealAudioRate(),
+                                   SPEEX_RESAMPLER_QUALITY_DEFAULT,
+                                   nullptr);
+  map = mResamplerMap.AppendElement();
+  map->mResampler = resampler;
+  map->mTrackID = aTrack->GetID();
+
+  return resampler;
 }
 
 void
@@ -44,8 +80,10 @@ AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
 
   for (StreamBuffer::TrackIter tracks(inputStream->mBuffer, MediaSegment::AUDIO);
        !tracks.IsEnded(); tracks.Next()) {
-    
+  
     StreamBuffer::Track& inputTrack = *tracks;
+
+    SpeexResamplerState* resampler = GetTrackResampler(&inputTrack);
 
     for (GraphTime t = aFrom; t < aTo; t = next) {
       MediaInputPort::InputInterval interval = inputPort->GetNextInputInterval(t);
@@ -66,7 +104,7 @@ AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
         TrackTicks inputEndTicks = inputTrack.TimeToTicksRoundDown(inputEnd);
         if (inputTrack.GetEnd() <= inputEndTicks) {
           inputTrackEndPoint = inputTrack.GetEnd();
-          // *aOutputTrackFinished = true;
+          // track has ended
         }
       }
 
@@ -75,51 +113,43 @@ AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
         outputSegment.AppendNullData(ticks);
       }
       else {
-        TrackTicks inputEndTicks = TimeToTicksRoundUp(rate, inputEnd);
-        TrackTicks inputStartTicks = inputEndTicks - ticks;
-        outputSegment.AppendSlice(*inputTrack.GetSegment(),
-                             std::min(inputTrackEndPoint, inputStartTicks),
-                             std::min(inputTrackEndPoint, inputEndTicks));
+        // double finalSampleRate = mSampleRate;
+        // double finalPlaybackRate = finalSampleRate / IdealAudioRate();
+        // uint32_t availableInOuputBuffer = WEBAUDIO_BLOCK_SIZE - aBufferOffset;
+        // uint32_t inputSamples, outputSamples;
+
+        // Check if we are short on input or output buffer.
+        // if (aAvailableInInputBuffer < availableInOuputBuffer * finalPlaybackRate) {
+        //   outputSamples = ceil(aAvailableInInputBuffer / finalPlaybackRate);
+        //   inputSamples = aAvailableInInputBuffer;
+        // } else {
+        //   inputSamples = ceil(availableInOuputBuffer * finalPlaybackRate);
+        //   outputSamples = availableInOuputBuffer;
+        // }
+
+        // TrackTicks inputEndTicks = TimeToTicksRoundUp(rate, inputEnd);
+        // TrackTicks inputStartTicks = inputEndTicks - ticks;
+        // outputSegment.AppendSlice(*inputTrack.GetSegment(),
+        //                      std::min(inputTrackEndPoint, inputStartTicks),
+        //                      std::min(inputTrackEndPoint, inputEndTicks));
+
+        AudioSegment* inputSegment = inputTrack.Get<AudioSegment>();
+
+        for (AudioSegment::ChunkIterator ci(*inputSegment); !ci.IsEnded(); ci.Next()) {
+          AudioChunk& c = *ci;
+          for (uint32_t i = 0; i < c.mChannelData.Length(); ++i) {
+            // uint32_t inSamples = inputSamples;
+            // uint32_t outSamples = outputSamples;
+            // speex_resampler_process_float(resampler, i,
+            //                               inputData, &inSamples,
+            //                               outputData, &outSamples);
+          }
+        }
 
       }
 
     }
   }
-
-  // if (from < to) {
-  //   for (StreamBuffer::TrackIter tracks(mExternalStream->mBuffer, MediaSegment::AUDIO);
-  //        !tracks.IsEnded(); tracks.Next()) {
-      
-  //     StreamBuffer::Track& externalTrack = *tracks;
-
-  //     TrackRate rate = externalTrack.GetRate();
-
-  //     TrackTicks startTicks = TimeToTicksRoundDown(rate, from);
-  //     TrackTicks endTicks = TimeToTicksRoundDown(rate, to);
-  //     printf("Consuming %lld samples\n", endTicks - startTicks);
-
-  //     AudioSegment* externalSegment = externalTrack.Get<AudioSegment>();
-  //     outputSegment.AppendSlice(*externalSegment, startTicks, endTicks);
-
-  //     for (AudioSegment::ChunkIterator chunks(outputSegment);
-  //          !chunks.IsEnded(); chunks.Next()) {
-  //       AudioChunk& externalChunk = *chunks;
-  //       if (!externalChunk.IsNull()) {
-
-  //         if (outputChunk.IsNull()) {
-  //           AllocateAudioBlock(externalChunk.mChannelData.Length(), &outputChunk);
-  //           WriteZeroesToAudioBlock(&outputChunk, 0, WEBAUDIO_BLOCK_SIZE);
-  //         }
-  //         for (uint32_t c = 0; c < externalChunk.mChannelData.Length(); ++c) {
-  //           AudioBlockAddChannelWithScale(
-  //             static_cast<float*>(const_cast<void*>(externalChunk.mChannelData[c])),
-  //             externalChunk.mVolume,
-  //             static_cast<float*>(const_cast<void*>(outputChunk.mChannelData[c])));
-  //         }
-  //       }
-  //     }
-  //   }
-  // }
 
   mLastChunk = outputChunk;
   FinalizeProducedOutput(&outputChunk);

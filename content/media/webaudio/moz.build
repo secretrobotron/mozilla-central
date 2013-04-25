@@ -32,6 +32,7 @@ EXPORTS.mozilla.dom += [
     'DynamicsCompressorNode.h',
     'EnableWebAudioCheck.h',
     'GainNode.h',
+    'MediaStreamAudioSourceNode.h',
     'PannerNode.h',
     'ScriptProcessorNode.h',
 ]

@@ -21,7 +21,7 @@ MediaStreamAudioSourceNode::MediaStreamAudioSourceNode(AudioContext* aContext,
                                                        const DOMMediaStream* aMediaStream)
   : AudioNode(aContext)
 {
-  AudioNodeEngine* engine = new AudioNodeEngine();
+  AudioNodeEngine* engine = new AudioNodeEngine(this);
   mStream = aContext->Graph()->CreateAudioNodeExternalInputStream(engine,
                                                                   MediaStreamGraph::INTERNAL_STREAM);
   ProcessedMediaStream* outputStream = static_cast<ProcessedMediaStream*>(mStream.get());

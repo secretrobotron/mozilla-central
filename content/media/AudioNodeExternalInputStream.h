@@ -18,22 +18,31 @@
 #define LOG(type, msg)
 #endif
 
+// Forward declaration of for Speex for mResamplerMap
+typedef struct SpeexResamplerState_ SpeexResamplerState;
+
 namespace mozilla {
 
 class AudioNodeExternalInputStream : public AudioNodeStream {
 public:
 
-  /**
-   * Transfers ownership of aEngine to the new AudioNodeExternalInputStream.
-   */
   AudioNodeExternalInputStream(AudioNodeEngine* aEngine,
-                               MediaStreamGraph::AudioNodeStreamKind aKind)
-    : AudioNodeStream(aEngine, aKind)
-  {
-  }
+                               MediaStreamGraph::AudioNodeStreamKind aKind,
+                               uint32_t aNumberOfInputChannels = 0);
+
   ~AudioNodeExternalInputStream();
 
   virtual void ProduceOutput(GraphTime aFrom, GraphTime aTo);
+
+private:
+  struct ResamplerMapEntry {
+    SpeexResamplerState* mResampler;
+    TrackID mTrackID;
+  };
+
+  nsTArray<ResamplerMapEntry> mResamplerMap;
+
+  SpeexResamplerState* GetTrackResampler(StreamBuffer::Track* aTrack);
 };
 
 }

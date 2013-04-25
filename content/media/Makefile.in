@@ -18,8 +18,8 @@ endif # !_MSC_VER
 CPPSRCS = \
   AudioChannelFormat.cpp \
   AudioNodeEngine.cpp \
-  AudioNodeStream.cpp \
   AudioNodeExternalInputStream.cpp \
+  AudioNodeStream.cpp \
   AudioSegment.cpp \
   AudioStream.cpp \
   DecoderTraits.cpp \

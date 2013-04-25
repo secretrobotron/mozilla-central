@@ -916,7 +916,8 @@ public:
                                          uint32_t aNumberOfInputChannels = 0);
   AudioNodeExternalInputStream*
   CreateAudioNodeExternalInputStream(AudioNodeEngine* aEngine,
-                                     AudioNodeStreamKind aKind);
+                                     AudioNodeStreamKind aKind,
+                                     uint32_t aNumberOfInputChannels = 0);
   /**
    * Returns the number of graph updates sent. This can be used to track
    * whether a given update has been processed by the graph thread and reflected

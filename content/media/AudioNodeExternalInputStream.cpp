@@ -66,8 +66,6 @@ AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
   AudioChunk outputChunk;
   outputChunk.SetNull(WEBAUDIO_BLOCK_SIZE);
 
-  AudioSegment outputSegment;
-
   MOZ_ASSERT(mInputs.Length() == 1);
 
   MediaInputPort* inputPort = mInputs[0];
@@ -110,41 +108,66 @@ AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
 
       if (interval.mInputIsBlocked) {
         // Maybe the input track ended?
-        outputSegment.AppendNullData(ticks);
+        //outputSegment.AppendNullData(ticks);
       }
       else {
-        // double finalSampleRate = mSampleRate;
-        // double finalPlaybackRate = finalSampleRate / IdealAudioRate();
-        // uint32_t availableInOuputBuffer = WEBAUDIO_BLOCK_SIZE - aBufferOffset;
-        // uint32_t inputSamples, outputSamples;
+        uint32_t bufferOffset = 0;
+        double finalSampleRate = rate;
+        double finalPlaybackRate = finalSampleRate / IdealAudioRate();
+        uint32_t availableInOutputBuffer = WEBAUDIO_BLOCK_SIZE - bufferOffset;
+        uint32_t availableInInputBuffer = 0;
+        uint32_t inputSamples, outputSamples;
 
         // Check if we are short on input or output buffer.
-        // if (aAvailableInInputBuffer < availableInOuputBuffer * finalPlaybackRate) {
-        //   outputSamples = ceil(aAvailableInInputBuffer / finalPlaybackRate);
-        //   inputSamples = aAvailableInInputBuffer;
-        // } else {
-        //   inputSamples = ceil(availableInOuputBuffer * finalPlaybackRate);
-        //   outputSamples = availableInOuputBuffer;
-        // }
 
-        // TrackTicks inputEndTicks = TimeToTicksRoundUp(rate, inputEnd);
-        // TrackTicks inputStartTicks = inputEndTicks - ticks;
+        TrackTicks inputEndTicks = TimeToTicksRoundUp(rate, inputEnd);
+        TrackTicks inputStartTicks = inputEndTicks - ticks;
+
         // outputSegment.AppendSlice(*inputTrack.GetSegment(),
         //                      std::min(inputTrackEndPoint, inputStartTicks),
         //                      std::min(inputTrackEndPoint, inputEndTicks));
 
         AudioSegment* inputSegment = inputTrack.Get<AudioSegment>();
 
+        inputTrackEndPoint = std::min(inputTrackEndPoint, inputEndTicks);
+
+        nsTArray<AudioChunk*> currentChunks;
+        TrackTicks totalChunksDuration = 0;
         for (AudioSegment::ChunkIterator ci(*inputSegment); !ci.IsEnded(); ci.Next()) {
-          AudioChunk& c = *ci;
-          for (uint32_t i = 0; i < c.mChannelData.Length(); ++i) {
-            // uint32_t inSamples = inputSamples;
-            // uint32_t outSamples = outputSamples;
-            // speex_resampler_process_float(resampler, i,
-            //                               inputData, &inSamples,
-            //                               outputData, &outSamples);
+          AudioChunk& chunk = *ci;
+          totalChunksDuration += chunk.mDuration;
+          if (totalChunksDuration >= startTicks) {
+            currentChunks.AppendElement(&chunk);
+            availableInInputBuffer += chunk.mDuration;
           }
         }
+
+        if (currentChunks.Length()) {
+          if (outputChunk.IsNull()) {
+            AllocateAudioBlock(currentChunks[0]->mChannelData.Length(), &outputChunk);  
+          }
+
+          if (availableInInputBuffer < availableInOutputBuffer * finalPlaybackRate) {
+            outputSamples = ceil(availableInInputBuffer / finalPlaybackRate);
+            inputSamples = availableInInputBuffer;
+          } else {
+            inputSamples = ceil(availableInOutputBuffer * finalPlaybackRate);
+            outputSamples = availableInOutputBuffer;
+          }
+
+          for (uint32_t j = 0; j < currentChunks.Length(); ++j) {
+            AudioChunk& c = *currentChunks[j];
+            for (uint32_t i = 0; i < c.mChannelData.Length(); ++i) {
+              float* outputData = static_cast<float*>(const_cast<void*>(outputChunk.mChannelData[i]));
+              float* inputData = static_cast<float*>(const_cast<void*>(c.mChannelData[i]));
+              speex_resampler_process_float(resampler, i,
+                                            inputData, &inputSamples,
+                                            outputData, &outputSamples);
+            }
+          }
+        }
+
+
 
       }
 

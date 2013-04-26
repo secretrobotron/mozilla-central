@@ -196,14 +196,6 @@ public:
     mChunks.Clear();
   }
 
-  Chunk* GetLastChunk()
-  {
-    if (mChunks.IsEmpty()) {
-      return nullptr;
-    }
-    return &mChunks[mChunks.Length() - 1];
-  }
-
   class ChunkIterator {
   public:
     ChunkIterator(MediaSegmentBase<C, Chunk>& aSegment)
@@ -283,6 +275,14 @@ protected:
       offset = nextOffset;
     }
     return nullptr;
+  }
+
+  Chunk* GetLastChunk()
+  {
+    if (mChunks.IsEmpty()) {
+      return nullptr;
+    }
+    return &mChunks[mChunks.Length() - 1];
   }
 
   void RemoveLeading(TrackTicks aDuration, uint32_t aStartIndex)

@@ -43,6 +43,12 @@ private:
   nsTArray<ResamplerMapEntry> mResamplerMap;
 
   SpeexResamplerState* GetTrackResampler(StreamBuffer::Track* aTrack);
+
+  void WriteDataToOutputChunk(StreamBuffer::Track* aInputTrack,
+                              AudioChunk* aOutputChunk,
+                              TrackRate aInputRate,
+                              TrackTicks aStartTicks,
+                              TrackTicks aEndTicks);
 };
 
 }

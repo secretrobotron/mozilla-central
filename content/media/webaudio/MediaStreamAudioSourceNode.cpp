@@ -23,7 +23,8 @@ MediaStreamAudioSourceNode::MediaStreamAudioSourceNode(AudioContext* aContext,
 {
   AudioNodeEngine* engine = new AudioNodeEngine(this);
   mStream = aContext->Graph()->CreateAudioNodeExternalInputStream(engine,
-                                                                  MediaStreamGraph::INTERNAL_STREAM);
+                                                                  MediaStreamGraph::INTERNAL_STREAM,
+                                                                  2);
   ProcessedMediaStream* outputStream = static_cast<ProcessedMediaStream*>(mStream.get());
   mInputPort = outputStream->AllocateInputPort(aMediaStream->GetStream());
 }

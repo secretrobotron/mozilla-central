@@ -61,6 +61,77 @@ AudioNodeExternalInputStream::GetTrackResampler(StreamBuffer::Track* aTrack)
 }
 
 void
+AudioNodeExternalInputStream::WriteDataToOutputChunk(StreamBuffer::Track* aInputTrack,
+                                                     AudioChunk* aOutputChunk,
+                                                     TrackRate aInputRate,
+                                                     TrackTicks aStartTicks,
+                                                     TrackTicks aEndTicks)
+{
+  uint32_t bufferOffset = 0;
+  double finalSampleRate = aInputRate;
+  double finalPlaybackRate = finalSampleRate / IdealAudioRate();
+  uint32_t availableInOutputBuffer = WEBAUDIO_BLOCK_SIZE - bufferOffset;
+  uint32_t availableInInputBuffer = 0;
+  uint32_t inputSamples, outputSamples;
+
+  AudioSegment* inputSegment = aInputTrack->Get<AudioSegment>();
+  AudioSegment tmpSegment;
+
+  AudioChunk tmpChunk;
+
+  tmpSegment.AppendSlice(*inputSegment, aStartTicks, aEndTicks);
+
+  nsTArray<AudioChunk*> currentChunks;
+  // TrackTicks totalChunksDuration = 0;
+  for (AudioSegment::ChunkIterator ci(tmpSegment); !ci.IsEnded(); ci.Next()) {
+    AudioChunk& chunk = *ci;
+    availableInInputBuffer += chunk.mDuration;
+    //if (totalChunksDuration >= aStartTicks) {
+    currentChunks.AppendElement(&chunk);
+    //  availableInInputBuffer += chunk.mDuration;
+    //}
+  }
+
+  if (currentChunks.Length()) {
+    SpeexResamplerState* resampler = GetTrackResampler(aInputTrack);
+
+    if (aOutputChunk->IsNull()) {
+      AllocateAudioBlock(mNumberOfInputChannels, aOutputChunk);
+      WriteZeroesToAudioBlock(aOutputChunk, 0, WEBAUDIO_BLOCK_SIZE);
+    }
+
+    AllocateAudioBlock(mNumberOfInputChannels, &tmpChunk);
+    WriteZeroesToAudioBlock(&tmpChunk, 0, WEBAUDIO_BLOCK_SIZE);
+
+    if (availableInInputBuffer < availableInOutputBuffer * finalPlaybackRate) {
+      outputSamples = ceil(availableInInputBuffer / finalPlaybackRate);
+      inputSamples = availableInInputBuffer;
+    } else {
+      inputSamples = ceil(availableInOutputBuffer * finalPlaybackRate);
+      outputSamples = availableInOutputBuffer;
+    }
+
+    for (uint32_t j = 0; j < currentChunks.Length(); ++j) {
+      AudioChunk& c = *currentChunks[j];
+      for (uint32_t i = 0; i < c.mChannelData.Length() && i < mNumberOfInputChannels; ++i) {
+        float* outputData = static_cast<float*>(const_cast<void*>(tmpChunk.mChannelData[i]));
+        float* inputData = static_cast<float*>(const_cast<void*>(c.mChannelData[i]));
+        float* finalData = static_cast<float*>(const_cast<void*>(aOutputChunk->mChannelData[i]));
+        speex_resampler_process_float(resampler, i,
+                                      inputData, &inputSamples,
+                                      outputData, &outputSamples);
+
+        // Add tmpChunk channel data to outputChunk. Note: Not a straight copy because we need to retain
+        // data already in outputChunk.
+        for (uint32_t j = 0; j < WEBAUDIO_BLOCK_SIZE; ++j) {
+          finalData[j] += outputData[j];
+        }
+      }
+    }
+  }
+}
+
+void
 AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
 {
   AudioChunk outputChunk;
@@ -81,8 +152,6 @@ AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
   
     StreamBuffer::Track& inputTrack = *tracks;
 
-    SpeexResamplerState* resampler = GetTrackResampler(&inputTrack);
-
     for (GraphTime t = aFrom; t < aTo; t = next) {
       MediaInputPort::InputInterval interval = inputPort->GetNextInputInterval(t);
       interval.mEnd = std::min(interval.mEnd, aTo);
@@ -93,7 +162,7 @@ AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
       TrackRate rate = inputTrack.GetRate();
       TrackTicks startTicks = TimeToTicksRoundDown(rate, from);
       TrackTicks endTicks = TimeToTicksRoundDown(rate, to);
-      TrackTicks ticks = endTicks - startTicks;
+      TrackTicks ticksDuration = endTicks - startTicks;
 
       StreamTime inputEnd = inputStream->GraphTimeToStreamTime(interval.mEnd);
       TrackTicks inputTrackEndPoint = TRACK_TICKS_MAX;
@@ -108,67 +177,15 @@ AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
 
       if (interval.mInputIsBlocked) {
         // Maybe the input track ended?
-        //outputSegment.AppendNullData(ticks);
+        //outputSegment.AppendNullData(ticksDuration);
       }
       else {
-        uint32_t bufferOffset = 0;
-        double finalSampleRate = rate;
-        double finalPlaybackRate = finalSampleRate / IdealAudioRate();
-        uint32_t availableInOutputBuffer = WEBAUDIO_BLOCK_SIZE - bufferOffset;
-        uint32_t availableInInputBuffer = 0;
-        uint32_t inputSamples, outputSamples;
-
-        // Check if we are short on input or output buffer.
-
         TrackTicks inputEndTicks = TimeToTicksRoundUp(rate, inputEnd);
-        TrackTicks inputStartTicks = inputEndTicks - ticks;
+        TrackTicks inputStartTicks = inputEndTicks - ticksDuration;
 
-        // outputSegment.AppendSlice(*inputTrack.GetSegment(),
-        //                      std::min(inputTrackEndPoint, inputStartTicks),
-        //                      std::min(inputTrackEndPoint, inputEndTicks));
-
-        AudioSegment* inputSegment = inputTrack.Get<AudioSegment>();
-
-        inputTrackEndPoint = std::min(inputTrackEndPoint, inputEndTicks);
-
-        nsTArray<AudioChunk*> currentChunks;
-        TrackTicks totalChunksDuration = 0;
-        for (AudioSegment::ChunkIterator ci(*inputSegment); !ci.IsEnded(); ci.Next()) {
-          AudioChunk& chunk = *ci;
-          totalChunksDuration += chunk.mDuration;
-          if (totalChunksDuration >= startTicks) {
-            currentChunks.AppendElement(&chunk);
-            availableInInputBuffer += chunk.mDuration;
-          }
-        }
-
-        if (currentChunks.Length()) {
-          if (outputChunk.IsNull()) {
-            AllocateAudioBlock(currentChunks[0]->mChannelData.Length(), &outputChunk);  
-          }
-
-          if (availableInInputBuffer < availableInOutputBuffer * finalPlaybackRate) {
-            outputSamples = ceil(availableInInputBuffer / finalPlaybackRate);
-            inputSamples = availableInInputBuffer;
-          } else {
-            inputSamples = ceil(availableInOutputBuffer * finalPlaybackRate);
-            outputSamples = availableInOutputBuffer;
-          }
-
-          for (uint32_t j = 0; j < currentChunks.Length(); ++j) {
-            AudioChunk& c = *currentChunks[j];
-            for (uint32_t i = 0; i < c.mChannelData.Length(); ++i) {
-              float* outputData = static_cast<float*>(const_cast<void*>(outputChunk.mChannelData[i]));
-              float* inputData = static_cast<float*>(const_cast<void*>(c.mChannelData[i]));
-              speex_resampler_process_float(resampler, i,
-                                            inputData, &inputSamples,
-                                            outputData, &outputSamples);
-            }
-          }
-        }
-
-
-
+        WriteDataToOutputChunk(&inputTrack, &outputChunk,
+                               rate,
+                               inputStartTicks, std::min(inputTrackEndPoint, inputEndTicks));
       }
 
     }

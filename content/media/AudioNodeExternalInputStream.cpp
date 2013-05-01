@@ -36,7 +36,8 @@ AudioNodeExternalInputStream::~AudioNodeExternalInputStream()
 }
 
 SpeexResamplerState*
-AudioNodeExternalInputStream::GetTrackResampler(StreamBuffer::Track* aTrack)
+AudioNodeExternalInputStream::GetTrackResampler(StreamBuffer::Track* aTrack,
+                                                uint32_t aNumberOfInputChannels)
 {
   SpeexResamplerState* resampler;
   ResamplerMapEntry* map;
@@ -48,7 +49,7 @@ AudioNodeExternalInputStream::GetTrackResampler(StreamBuffer::Track* aTrack)
     }
   }
 
-  resampler = speex_resampler_init(mNumberOfInputChannels,
+  resampler = speex_resampler_init(aNumberOfInputChannels,
                                    aTrack->GetRate(),
                                    IdealAudioRate(),
                                    SPEEX_RESAMPLER_QUALITY_DEFAULT,
@@ -67,17 +68,13 @@ AudioNodeExternalInputStream::WriteDataToOutputChunk(StreamBuffer::Track* aInput
                                                      TrackTicks aStartTicks,
                                                      TrackTicks aEndTicks)
 {
-  uint32_t bufferOffset = 0;
-  double finalSampleRate = aInputRate;
-  double finalPlaybackRate = finalSampleRate / IdealAudioRate();
-  uint32_t availableInOutputBuffer = WEBAUDIO_BLOCK_SIZE - bufferOffset;
+  double finalPlaybackRate = aInputRate / IdealAudioRate();
+  uint32_t availableInOutputBuffer = WEBAUDIO_BLOCK_SIZE;
   uint32_t availableInInputBuffer = 0;
   uint32_t inputSamples, outputSamples;
 
   AudioSegment* inputSegment = aInputTrack->Get<AudioSegment>();
   AudioSegment tmpSegment;
-
-  AudioChunk tmpChunk;
 
   tmpSegment.AppendSlice(*inputSegment, aStartTicks, aEndTicks);
 
@@ -85,46 +82,78 @@ AudioNodeExternalInputStream::WriteDataToOutputChunk(StreamBuffer::Track* aInput
   // TrackTicks totalChunksDuration = 0;
   for (AudioSegment::ChunkIterator ci(tmpSegment); !ci.IsEnded(); ci.Next()) {
     AudioChunk& chunk = *ci;
-    availableInInputBuffer += chunk.mDuration;
+    availableInInputBuffer += chunk.GetDuration();
     //if (totalChunksDuration >= aStartTicks) {
     currentChunks.AppendElement(&chunk);
     //  availableInInputBuffer += chunk.mDuration;
     //}
   }
 
-  if (currentChunks.Length()) {
-    SpeexResamplerState* resampler = GetTrackResampler(aInputTrack);
-
-    if (aOutputChunk->IsNull()) {
-      AllocateAudioBlock(mNumberOfInputChannels, aOutputChunk);
-      WriteZeroesToAudioBlock(aOutputChunk, 0, WEBAUDIO_BLOCK_SIZE);
+  if (!currentChunks.IsEmpty()) {
+    bool newChunk = aOutputChunk->IsNull();
+    const uint32_t numberOfChannels = currentChunks[0]->mChannelData.Length();
+    if (newChunk) {
+      AllocateAudioBlock(numberOfChannels, aOutputChunk);
     }
 
-    AllocateAudioBlock(mNumberOfInputChannels, &tmpChunk);
-    WriteZeroesToAudioBlock(&tmpChunk, 0, WEBAUDIO_BLOCK_SIZE);
-
-    if (availableInInputBuffer < availableInOutputBuffer * finalPlaybackRate) {
-      outputSamples = ceil(availableInInputBuffer / finalPlaybackRate);
-      inputSamples = availableInInputBuffer;
-    } else {
-      inputSamples = ceil(availableInOutputBuffer * finalPlaybackRate);
-      outputSamples = availableInOutputBuffer;
-    }
+    SpeexResamplerState* resampler = GetTrackResampler(aInputTrack, numberOfChannels);
 
     for (uint32_t j = 0; j < currentChunks.Length(); ++j) {
-      AudioChunk& c = *currentChunks[j];
-      for (uint32_t i = 0; i < c.mChannelData.Length() && i < mNumberOfInputChannels; ++i) {
-        float* outputData = static_cast<float*>(const_cast<void*>(tmpChunk.mChannelData[i]));
-        float* inputData = static_cast<float*>(const_cast<void*>(c.mChannelData[i]));
-        float* finalData = static_cast<float*>(const_cast<void*>(aOutputChunk->mChannelData[i]));
-        speex_resampler_process_float(resampler, i,
-                                      inputData, &inputSamples,
-                                      outputData, &outputSamples);
+      if (availableInInputBuffer < availableInOutputBuffer * finalPlaybackRate) {
+        outputSamples = ceil(availableInInputBuffer / finalPlaybackRate);
+        inputSamples = availableInInputBuffer;
+      } else {
+        inputSamples = ceil(availableInOutputBuffer * finalPlaybackRate);
+        outputSamples = availableInOutputBuffer;
+      }
 
-        // Add tmpChunk channel data to outputChunk. Note: Not a straight copy because we need to retain
-        // data already in outputChunk.
-        for (uint32_t j = 0; j < WEBAUDIO_BLOCK_SIZE; ++j) {
-          finalData[j] += outputData[j];
+      AudioChunk& c = *currentChunks[j];
+      for (uint32_t i = 0; i < c.mChannelData.Length() && i < numberOfChannels; ++i) {
+        // rawBuffer can hold either int16 or float audio data, depending on the format of
+        // the input chunks.  We're using a raw byte buffer that can fit in a channel of
+        // floats, which would be more than enough for int16.
+        char rawBuffer[sizeof(float) * WEBAUDIO_BLOCK_SIZE];
+        uint32_t currentOutputOffset = WEBAUDIO_BLOCK_SIZE - availableInOutputBuffer;
+
+        uint32_t in = inputSamples;
+        uint32_t out = outputSamples;
+        float* finalData = static_cast<float*>(const_cast<void*>(aOutputChunk->mChannelData[i]));
+        if (c.mBufferFormat == AUDIO_FORMAT_S16) {
+          int16_t* outputData = reinterpret_cast<int16_t*>(rawBuffer);
+          int16_t* inputData = static_cast<int16_t*>(const_cast<void*>(c.mChannelData[i]));
+          speex_resampler_process_int(resampler, i,
+                                      inputData, &in,
+                                      outputData, &out);
+
+          for (uint32_t k = currentOutputOffset; k < currentOutputOffset + out; ++k) {
+            if (newChunk) {
+              finalData[k] = AudioSampleToFloat(outputData[k]);
+            } else {
+              finalData[k] += AudioSampleToFloat(outputData[k]);
+            }
+          }
+        } else {
+          float* outputData = reinterpret_cast<float*>(rawBuffer);
+          float* inputData = static_cast<float*>(const_cast<void*>(c.mChannelData[i]));
+          speex_resampler_process_float(resampler, i,
+                                        inputData, &in,
+                                        outputData, &out);
+          printf("input: %d => %d\toutput: %d => %d\n",
+            inputSamples, in, outputSamples, out);
+          
+          for (uint32_t k = currentOutputOffset; k < currentOutputOffset + out; ++k) {
+            if (newChunk) {
+              finalData[k] = outputData[k];
+            } else {
+              finalData[k] += outputData[k];
+            }
+          }
+        }
+
+        if (i == c.mChannelData.Length() - 1) {
+          // In the last iteration of the loop, remember how many more frames we need to produce.
+          availableInOutputBuffer -= out;
+          availableInInputBuffer -= in;
         }
       }
     }

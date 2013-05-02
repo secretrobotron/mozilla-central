@@ -37,7 +37,15 @@ class DelayNodeEngine : public AudioNodeEngine
 
     NS_IMETHOD Run()
     {
-      nsRefPtr<DelayNode> node = static_cast<DelayNode*>(mStream->Engine()->Node());
+      nsRefPtr<DelayNode> node;
+      {
+        // No need to keep holding the lock for the whole duration of this
+        // function, since we're holding a strong reference to it, so if
+        // we can obtain the reference, we will hold the node alive in
+        // this function.
+        MutexAutoLock lock(mStream->Engine()->NodeMutex());
+        node = static_cast<DelayNode*>(mStream->Engine()->Node());
+      }
       if (node) {
         if (mChange == ADDREF) {
           node->mPlayingRef.Take(node);
@@ -200,7 +208,7 @@ public:
 
         // Write the input sample to the correct location in our buffer
         if (input) {
-          buffer[writeIndex] = input[i];
+          buffer[writeIndex] = input[i] * aInput.mVolume;
         }
 
         // Now, determine the correct read position.  We adjust the read position to be
@@ -263,7 +271,10 @@ public:
 };
 
 DelayNode::DelayNode(AudioContext* aContext, double aMaxDelay)
-  : AudioNode(aContext)
+  : AudioNode(aContext,
+              2,
+              ChannelCountMode::Max,
+              ChannelInterpretation::Speakers)
   , mDelay(new AudioParam(this, SendDelayToStream, 0.0f))
 {
   DelayNodeEngine* engine = new DelayNodeEngine(this, aContext->Destination());
@@ -274,7 +285,7 @@ DelayNode::DelayNode(AudioContext* aContext, double aMaxDelay)
 }
 
 JSObject*
-DelayNode::WrapObject(JSContext* aCx, JSObject* aScope)
+DelayNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return DelayNodeBinding::Wrap(aCx, aScope, this);
 }

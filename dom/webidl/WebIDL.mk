@@ -21,6 +21,7 @@ webidl_files = \
   AudioListener.webidl \
   AudioNode.webidl \
   AudioParam.webidl \
+  AudioStreamTrack.webidl \
   AudioProcessingEvent.webidl \
   BatteryManager.webidl \
   BeforeUnloadEvent.webidl \
@@ -158,10 +159,12 @@ webidl_files = \
   MediaError.webidl \
   MediaStream.webidl \
   MediaStreamAudioSourceNode.webidl \
+  MediaStreamTrack.webidl \
   MessageEvent.webidl \
   MouseEvent.webidl \
   MouseScrollEvent.webidl \
   MozActivity.webidl \
+  MozNamedAttrMap.webidl \
   MutationEvent.webidl \
   MutationObserver.webidl \
   NetDashboard.webidl \
@@ -288,6 +291,7 @@ webidl_files = \
   SVGURIReference.webidl \
   SVGViewElement.webidl \
   SVGZoomAndPan.webidl \
+  SVGZoomEvent.webidl \
   Text.webidl \
   TextDecoder.webidl \
   TextEncoder.webidl \
@@ -306,6 +310,8 @@ webidl_files = \
   UndoManager.webidl \
   URLUtils.webidl \
   USSDReceivedEvent.webidl \
+  VideoStreamTrack.webidl \
+  Window.webidl \
   XMLDocument.webidl \
   XMLHttpRequest.webidl \
   XMLHttpRequestEventTarget.webidl \

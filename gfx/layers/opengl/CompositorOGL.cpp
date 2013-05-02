@@ -224,12 +224,12 @@ int ShaderProgramOGL::sCurrentProgramKey = 0;
 #endif
 
 CompositorOGL::CompositorOGL(nsIWidget *aWidget, int aSurfaceWidth,
-                             int aSurfaceHeight, bool aIsRenderingToEGLSurface)
+                             int aSurfaceHeight, bool aUseExternalSurfaceSize)
   : mWidget(aWidget)
   , mWidgetSize(-1, -1)
   , mSurfaceSize(aSurfaceWidth, aSurfaceHeight)
   , mHasBGRA(0)
-  , mIsRenderingToEGLSurface(aIsRenderingToEGLSurface)
+  , mUseExternalSurfaceSize(aUseExternalSurfaceSize)
   , mFrameInProgress(false)
   , mDestroyed(false)
 {
@@ -621,6 +621,9 @@ CompositorOGL::PrepareViewport(const gfx::IntSize& aSize,
   viewMatrix.Translate(-gfxPoint(1.0, -1.0));
   viewMatrix.Scale(2.0f / float(aSize.width), 2.0f / float(aSize.height));
   viewMatrix.Scale(1.0f, -1.0f);
+  if (!mTarget) {
+    viewMatrix.Translate(gfxPoint(mRenderOffset.x, mRenderOffset.y));
+  }
 
   viewMatrix = aWorldTransform * viewMatrix;
 
@@ -761,7 +764,7 @@ CompositorOGL::BeginFrame(const Rect *aClipRectIn, const gfxMatrix& aTransform,
 
   mFrameInProgress = true;
   gfxRect rect;
-  if (mIsRenderingToEGLSurface) {
+  if (mUseExternalSurfaceSize) {
     rect = gfxRect(0, 0, mSurfaceSize.width, mSurfaceSize.height);
   } else {
     rect = gfxRect(aRenderBounds.x, aRenderBounds.y, aRenderBounds.width, aRenderBounds.height);
@@ -1206,7 +1209,7 @@ CompositorOGL::EndFrame()
 #ifdef MOZ_DUMP_PAINTING
   if (gfxUtils::sDumpPainting) {
     nsIntRect rect;
-    if (mIsRenderingToEGLSurface) {
+    if (mUseExternalSurfaceSize) {
       rect = nsIntRect(0, 0, mSurfaceSize.width, mSurfaceSize.height);
     } else {
       mWidget->GetBounds(rect);
@@ -1284,7 +1287,7 @@ void
 CompositorOGL::CopyToTarget(gfxContext *aTarget, const gfxMatrix& aTransform)
 {
   nsIntRect rect;
-  if (mIsRenderingToEGLSurface) {
+  if (mUseExternalSurfaceSize) {
     rect = nsIntRect(0, 0, mSurfaceSize.width, mSurfaceSize.height);
   } else {
     rect = nsIntRect(0, 0, mWidgetSize.width, mWidgetSize.height);

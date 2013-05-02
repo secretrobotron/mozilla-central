@@ -14,8 +14,8 @@
 #include "AutoOpenSurface.h"
 #include "mozilla/ipc/SharedMemorySysV.h"
 #include "mozilla/layers/PLayerChild.h"
-#include "mozilla/layers/PLayersChild.h"
-#include "mozilla/layers/PLayersParent.h"
+#include "mozilla/layers/PLayerTransactionChild.h"
+#include "mozilla/layers/PLayerTransactionParent.h"
 #include "mozilla/layers/LayerTransaction.h"
 #include "mozilla/layers/LayersSurfaces.h"
 #include "ShadowLayers.h"
@@ -589,25 +589,6 @@ bool
 ISurfaceAllocator::PlatformDestroySharedSurface(SurfaceDescriptor*)
 {
   return false;
-}
-
-/*static*/ already_AddRefed<TextureImage>
-ShadowLayerManager::OpenDescriptorForDirectTexturing(GLContext*,
-                                                     const SurfaceDescriptor&,
-                                                     GLenum)
-{
-  return nullptr;
-}
-
-/*static*/ bool
-ShadowLayerManager::SupportsDirectTexturing()
-{
-  return false;
-}
-
-/*static*/ void
-ShadowLayerManager::PlatformSyncBeforeReplyUpdate()
-{
 }
 
 #endif  // !defined(MOZ_HAVE_PLATFORM_SPECIFIC_LAYER_BUFFERS)

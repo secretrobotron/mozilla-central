@@ -21,6 +21,20 @@ class LDivI : public LBinaryMath<1>
         setTemp(0, temp);
     }
 
+    const char *extraName() const {
+        if (mir()->isTruncated()) {
+            if (mir()->canBeNegativeZero()) {
+                return mir()->canBeNegativeOverflow()
+                       ? "Truncate_NegativeZero_NegativeOverflow"
+                       : "Truncate_NegativeZero";
+            }
+            return mir()->canBeNegativeOverflow() ? "Truncate_NegativeOverflow" : "Truncate";
+        }
+        if (mir()->canBeNegativeZero())
+            return mir()->canBeNegativeOverflow() ? "NegativeZero_NegativeOverflow" : "NegativeZero";
+        return mir()->canBeNegativeOverflow() ? "NegativeOverflow" : NULL;
+    }
+
     const LDefinition *remainder() {
         return getTemp(0);
     }
@@ -38,6 +52,10 @@ class LModI : public LBinaryMath<1>
         setOperand(0, lhs);
         setOperand(1, rhs);
         setTemp(0, temp);
+    }
+
+    const char *extraName() const {
+        return mir()->isTruncated() ? "Truncated" : NULL;
     }
 
     const LDefinition *remainder() {
@@ -173,7 +191,6 @@ class LTableSwitchV : public LInstructionHelper<0, BOX_PIECES, 3>
     }
 };
 
-// Guard against an object's shape.
 class LGuardShape : public LInstructionHelper<0, 1, 0>
 {
   public:
@@ -184,6 +201,19 @@ class LGuardShape : public LInstructionHelper<0, 1, 0>
     }
     const MGuardShape *mir() const {
         return mir_->toGuardShape();
+    }
+};
+
+class LGuardObjectType : public LInstructionHelper<0, 1, 0>
+{
+  public:
+    LIR_HEADER(GuardObjectType)
+
+    LGuardObjectType(const LAllocation &in) {
+        setOperand(0, in);
+    }
+    const MGuardObjectType *mir() const {
+        return mir_->toGuardObjectType();
     }
 };
 
@@ -204,7 +234,13 @@ class LMulI : public LBinaryMath<0, 1>
         setOperand(2, lhsCopy);
     }
 
-    MMul *mir() {
+    const char *extraName() const {
+        return (mir()->mode() == MMul::Integer)
+               ? "Integer"
+               : (mir()->canBeNegativeZero() ? "CanBeNegativeZero" : NULL);
+    }
+
+    MMul *mir() const {
         return mir_->toMul();
     }
     const LAllocation *lhsCopy() {

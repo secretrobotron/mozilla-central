@@ -19,12 +19,11 @@ NS_IMPL_ISUPPORTS_INHERITED0(MediaStreamAudioSourceNode, AudioNode)
 
 MediaStreamAudioSourceNode::MediaStreamAudioSourceNode(AudioContext* aContext,
                                                        const DOMMediaStream* aMediaStream)
-  : AudioNode(aContext)
+  : AudioNode(aContext, 2, ChannelCountMode::Max, ChannelInterpretation::Speakers)
 {
   AudioNodeEngine* engine = new AudioNodeEngine(this);
   mStream = aContext->Graph()->CreateAudioNodeExternalInputStream(engine,
-                                                                  MediaStreamGraph::INTERNAL_STREAM,
-                                                                  2);
+                                                                  MediaStreamGraph::INTERNAL_STREAM);
   ProcessedMediaStream* outputStream = static_cast<ProcessedMediaStream*>(mStream.get());
   mInputPort = outputStream->AllocateInputPort(aMediaStream->GetStream());
 }
@@ -36,7 +35,7 @@ MediaStreamAudioSourceNode::~MediaStreamAudioSourceNode()
 }
 
 JSObject*
-MediaStreamAudioSourceNode::WrapObject(JSContext* aCx, JSObject* aScope)
+MediaStreamAudioSourceNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return MediaStreamAudioSourceNodeBinding::Wrap(aCx, aScope, this);
 }

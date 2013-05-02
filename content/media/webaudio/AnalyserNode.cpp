@@ -30,7 +30,15 @@ class AnalyserNodeEngine : public AudioNodeEngine
 
     NS_IMETHOD Run()
     {
-      nsRefPtr<AnalyserNode> node = static_cast<AnalyserNode*>(mStream->Engine()->Node());
+      nsRefPtr<AnalyserNode> node;
+      {
+        // No need to keep holding the lock for the whole duration of this
+        // function, since we're holding a strong reference to it, so if
+        // we can obtain the reference, we will hold the node alive in
+        // this function.
+        MutexAutoLock lock(mStream->Engine()->NodeMutex());
+        node = static_cast<AnalyserNode*>(mStream->Engine()->Node());
+      }
       if (node) {
         node->AppendChunk(mChunk);
       }
@@ -56,7 +64,9 @@ public:
   {
     *aOutput = aInput;
 
-    if (mNode &&
+    MutexAutoLock lock(NodeMutex());
+
+    if (Node() &&
         aInput.mChannelData.Length() > 0) {
       nsRefPtr<TransferBuffer> transfer = new TransferBuffer(aStream, aInput);
       NS_DispatchToMainThread(transfer);
@@ -65,7 +75,10 @@ public:
 };
 
 AnalyserNode::AnalyserNode(AudioContext* aContext)
-  : AudioNode(aContext)
+  : AudioNode(aContext,
+              1,
+              ChannelCountMode::Explicit,
+              ChannelInterpretation::Speakers)
   , mFFTSize(2048)
   , mMinDecibels(-100.)
   , mMaxDecibels(-30.)
@@ -78,7 +91,7 @@ AnalyserNode::AnalyserNode(AudioContext* aContext)
 }
 
 JSObject*
-AnalyserNode::WrapObject(JSContext* aCx, JSObject* aScope)
+AnalyserNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return AnalyserNodeBinding::Wrap(aCx, aScope, this);
 }

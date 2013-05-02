@@ -21,12 +21,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(MediaStreamAudioSourceNode, AudioNode)
 
-  virtual JSObject* WrapObject(JSContext* aCx, JSObject* aScope);
-
-  virtual bool SupportsMediaStreams() const MOZ_OVERRIDE
-  {
-    return true;
-  }
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope);
 
   virtual uint32_t NumberOfInputs() const MOZ_FINAL MOZ_OVERRIDE
   {

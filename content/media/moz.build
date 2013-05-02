@@ -75,3 +75,9 @@ EXPORTS += [
     'VorbisUtils.h',
 ]
 
+EXPORTS.mozilla.dom += [
+    'AudioStreamTrack.h',
+    'MediaStreamTrack.h',
+    'VideoStreamTrack.h',
+]
+

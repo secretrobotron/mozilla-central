@@ -7,6 +7,7 @@ package org.mozilla.gecko;
 
 import org.mozilla.gecko.db.BrowserContract.Combined;
 import org.mozilla.gecko.db.BrowserDB;
+import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.util.GamepadUtils;
 import org.mozilla.gecko.util.StringUtils;
 import org.mozilla.gecko.util.ThreadUtils;
@@ -19,7 +20,6 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -69,7 +69,6 @@ public class AwesomeBar extends GeckoActivity
     private CustomEditText mText;
     private ImageButton mGoButton;
     private ContextMenuSubject mContextMenuSubject;
-    private boolean mIsUsingGestureKeyboard;
     private boolean mDelayRestartInput;
     // The previous autocomplete result returned to us
     private String mAutoCompleteResult = "";
@@ -276,26 +275,6 @@ public class AwesomeBar extends GeckoActivity
     }
 
     @Override
-    public void onWindowFocusChanged(boolean hasFocus) {
-        super.onWindowFocusChanged(hasFocus);
-
-        // The Awesome Bar will receive focus when the Awesome Screen first opens or after the user
-        // closes the "Select Input Method" window. If the input method changes to or from Swype,
-        // then toggle the URL mode flag. Swype's URL mode disables the automatic word spacing that
-        // Swype users expect when entering search queries, but does not add any special VKB keys
-        // like ".com" or "/" that would be useful for entering URLs.
-
-        if (!hasFocus)
-            return;
-
-        boolean wasUsingGestureKeyboard = mIsUsingGestureKeyboard;
-        mIsUsingGestureKeyboard = InputMethods.isGestureKeyboard(this);
-        if (mIsUsingGestureKeyboard != wasUsingGestureKeyboard) {
-            updateKeyboardInputType();
-        }
-    }
-
-    @Override
     public void onConfigurationChanged(Configuration newConfiguration) {
         super.onConfigurationChanged(newConfiguration);
     }
@@ -355,12 +334,13 @@ public class AwesomeBar extends GeckoActivity
     }
 
     private void updateKeyboardInputType() {
-        // If the user enters a space, then we know they are entering search terms, not a URL. If
-        // we're using a gesture keyboard, we can then switch to text mode so the IME auto-inserts
-        // spaces between words.
+        // If the user enters a space, then we know they are entering search terms, not a URL.
+        // We can then switch to text mode so,
+        // 1) the IME auto-inserts spaces between words
+        // 2) the IME doesn't reset input keyboard to Latin keyboard.
         String text = mText.getText().toString();
         int currentInputType = mText.getInputType();
-        int newInputType = mIsUsingGestureKeyboard && StringUtils.isSearchQuery(text, false)
+        int newInputType = StringUtils.isSearchQuery(text, false)
                            ? (currentInputType & ~InputType.TYPE_TEXT_VARIATION_URI) // Text mode
                            : (currentInputType | InputType.TYPE_TEXT_VARIATION_URI); // URL mode
         if (newInputType != currentInputType) {
@@ -539,6 +519,62 @@ public class AwesomeBar extends GeckoActivity
         mContextMenuSubject = tab.getSubject(menu, view, menuInfo);
     }
 
+    private abstract class EditBookmarkTextWatcher implements TextWatcher {
+        protected AlertDialog mDialog;
+        protected EditBookmarkTextWatcher mPairedTextWatcher;
+        protected boolean mEnabled = true;
+
+        public EditBookmarkTextWatcher(AlertDialog aDialog) {
+            mDialog = aDialog;
+        }
+
+        public void setPairedTextWatcher(EditBookmarkTextWatcher aTextWatcher) {
+            mPairedTextWatcher = aTextWatcher;
+        }
+
+        public boolean isEnabled() {
+            return mEnabled;
+        }
+
+        @Override
+        public void onTextChanged(CharSequence s, int start, int before, int count) {
+            // Disable if the we're disabled or paired partner is disabled
+            boolean enabled = mEnabled && (mPairedTextWatcher == null || mPairedTextWatcher.isEnabled());
+            mDialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(enabled);
+        }
+
+        @Override
+        public void afterTextChanged(Editable s) {}
+        @Override
+        public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+    }
+
+    private class LocationTextWatcher extends EditBookmarkTextWatcher implements TextWatcher {
+        public LocationTextWatcher(AlertDialog aDialog) {
+            super(aDialog);
+        }
+
+        @Override
+        public void onTextChanged(CharSequence s, int start, int before, int count) {
+            // Disable if the location is empty
+            mEnabled = (s.toString().trim().length() > 0);
+            super.onTextChanged(s, start, before, count);
+        }
+    }
+
+    private class KeywordTextWatcher extends EditBookmarkTextWatcher implements TextWatcher {
+        public KeywordTextWatcher(AlertDialog aDialog) {
+            super(aDialog);
+        }
+
+        @Override
+        public void onTextChanged(CharSequence s, int start, int before, int count) {
+            // Disable if the keyword contains spaces
+            mEnabled = (s.toString().trim().indexOf(' ') == -1);
+            super.onTextChanged(s, start, before, count);
+       }
+    }
+
     @Override
     public boolean onContextItemSelected(MenuItem item) {
         if (mContextMenuSubject == null)
@@ -580,8 +616,8 @@ public class AwesomeBar extends GeckoActivity
                             @Override
                             public Void doInBackground(Void... params) {
                                 String newUrl = locationText.getText().toString().trim();
-                                BrowserDB.updateBookmark(getContentResolver(), id, newUrl, nameText.getText().toString(),
-                                                         keywordText.getText().toString());
+                                String newKeyword = keywordText.getText().toString().trim();
+                                BrowserDB.updateBookmark(getContentResolver(), id, newUrl, nameText.getText().toString(), newKeyword);
                                 return null;
                             }
 
@@ -602,25 +638,17 @@ public class AwesomeBar extends GeckoActivity
 
                 final AlertDialog dialog = editPrompt.create();
 
-                // disable OK button if the URL is empty
-                locationText.addTextChangedListener(new TextWatcher() {
-                    private boolean mEnabled = true;
+                // Create our TextWatchers
+                LocationTextWatcher locationTextWatcher = new LocationTextWatcher(dialog);
+                KeywordTextWatcher keywordTextWatcher = new KeywordTextWatcher(dialog);
 
-                    @Override
-                    public void afterTextChanged(Editable s) {}
+                // Cross reference the TextWatchers
+                locationTextWatcher.setPairedTextWatcher(keywordTextWatcher);
+                keywordTextWatcher.setPairedTextWatcher(locationTextWatcher);
 
-                    @Override
-                    public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-
-                    @Override
-                    public void onTextChanged(CharSequence s, int start, int before, int count) {
-                        boolean enabled = (s.toString().trim().length() > 0);
-                        if (mEnabled != enabled) {
-                            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(enabled);
-                            mEnabled = enabled;
-                        }
-                    }
-                });
+                // Add the TextWatcher Listeners
+                locationText.addTextChangedListener(locationTextWatcher);
+                keywordText.addTextChangedListener(keywordTextWatcher);
 
                 dialog.show();
                 break;
@@ -677,8 +705,9 @@ public class AwesomeBar extends GeckoActivity
                 }
 
                 Bitmap bitmap = null;
-                if (b != null)
-                    bitmap = BitmapFactory.decodeByteArray(b, 0, b.length);
+                if (b != null) {
+                    bitmap = BitmapUtils.decodeByteArray(b);
+                }
 
                 String shortcutTitle = TextUtils.isEmpty(title) ? url.replaceAll("^([a-z]+://)?(www\\.)?", "") : title;
                 GeckoAppShell.createShortcut(shortcutTitle, url, bitmap, "");

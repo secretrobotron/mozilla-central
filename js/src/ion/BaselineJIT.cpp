@@ -94,8 +94,9 @@ EnterBaseline(JSContext *cx, StackFrame *fp, void *jitcode, bool osr)
 
     void *calleeToken;
     if (fp->isNonEvalFunctionFrame()) {
-        // CountArgSlot include |this| and the |scopeChain|.
-        maxArgc = CountArgSlots(fp->fun()) - 1; // -1 = discard |scopeChain|
+        // CountArgSlot include |this| and the |scopeChain|, and maybe |argumentsObj|
+        // Want to keep including this, but remove the scopeChain and any argumentsObj.
+        maxArgc = CountArgSlots(fp->script(), fp->fun()) - StartArgSlot(fp->script(), fp->fun());
         maxArgv = fp->formals() - 1;            // -1 = include |this|
 
         // Formal arguments are the argument corresponding to the function
@@ -264,7 +265,7 @@ ion::CanEnterBaselineJIT(JSContext *cx, JSScript *scriptArg, StackFrame *fp, boo
     if (IsJSDEnabled(cx)) {
         if (JSOp(*cx->regs().pc) == JSOP_LOOPENTRY) // No OSR.
             return Method_Skipped;
-    } else if (scriptArg->incUseCount() <= js_IonOptions.baselineUsesBeforeCompile) {
+    } else if (script->incUseCount() <= js_IonOptions.baselineUsesBeforeCompile) {
         return Method_Skipped;
     }
 
@@ -658,7 +659,7 @@ BaselineScript::pcForReturnAddress(JSScript *script, uint8_t *nativeAddress)
 }
 
 void
-BaselineScript::toggleDebugTraps(RawScript script, jsbytecode *pc)
+BaselineScript::toggleDebugTraps(JSScript *script, jsbytecode *pc)
 {
     JS_ASSERT(script->baselineScript() == this);
 
@@ -778,7 +779,7 @@ BaselineScript::purgeOptimizedStubs(Zone *zone)
 }
 
 void
-ion::FinishDiscardBaselineScript(FreeOp *fop, RawScript script)
+ion::FinishDiscardBaselineScript(FreeOp *fop, JSScript *script)
 {
     if (!script->hasBaselineScript())
         return;

@@ -264,13 +264,7 @@ static nsIDocument *
 GetDocumentFromWindow(nsIDOMWindow *aWindow)
 {
   nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(aWindow);
-  nsCOMPtr<nsIDocument> doc;
-
-  if (win) {
-    doc = do_QueryInterface(win->GetExtantDocument());
-  }
-
-  return doc;
+  return win ? win->GetExtantDoc() : nullptr;
 }
 
 static int32_t
@@ -3256,7 +3250,7 @@ nsEventStateManager::PostHandleEvent(nsPresContext* aPresContext,
             currentWindow->GetTop(getter_AddRefs(currentTop));
             mDocument->GetWindow()->GetTop(getter_AddRefs(newTop));
             nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(currentWindow);
-            nsCOMPtr<nsIDocument> currentDoc = do_QueryInterface(win->GetExtantDocument());
+            nsCOMPtr<nsIDocument> currentDoc = win->GetExtantDoc();
             if (nsContentUtils::IsChromeDoc(currentDoc) ||
                 (currentTop && newTop && currentTop != newTop)) {
               fm->SetFocusedWindow(mDocument->GetWindow());
@@ -4561,7 +4555,9 @@ nsEventStateManager::CheckForAndDispatchClick(nsPresContext* aPresContext,
     nsCOMPtr<nsIPresShell> presShell = mPresContext->GetPresShell();
     if (presShell) {
       nsCOMPtr<nsIContent> mouseContent = GetEventTargetContent(aEvent);
-
+      if (!mouseContent && !mCurrentTarget) {
+        return NS_OK;
+      }
       ret = presShell->HandleEventWithTarget(&event, mCurrentTarget,
                                              mouseContent, aStatus);
       if (NS_SUCCEEDED(ret) && aEvent->clickCount == 2) {
@@ -4620,20 +4616,20 @@ nsEventStateManager::GetEventTargetContent(nsEvent* aEvent)
     return content.forget();
   }
 
-  nsIContent *content = nullptr;
+  nsCOMPtr<nsIContent> content;
 
   nsIPresShell *presShell = mPresContext->GetPresShell();
   if (presShell) {
-    content = presShell->GetEventTargetContent(aEvent).get();
+    content = presShell->GetEventTargetContent(aEvent);
   }
 
   // Some events here may set mCurrentTarget but not set the corresponding
   // event target in the PresShell.
   if (!content && mCurrentTarget) {
-    mCurrentTarget->GetContentForEvent(aEvent, &content);
+    mCurrentTarget->GetContentForEvent(aEvent, getter_AddRefs(content));
   }
 
-  return content;
+  return content.forget();
 }
 
 static Element*

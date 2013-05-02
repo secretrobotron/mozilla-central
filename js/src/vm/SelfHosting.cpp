@@ -19,6 +19,8 @@
 #include "jsfuninlines.h"
 #include "jstypedarrayinlines.h"
 
+#include "ion/BaselineJIT.h"
+
 #include "vm/BooleanObject-inl.h"
 #include "vm/NumberObject-inl.h"
 #include "vm/RegExpObject-inl.h"
@@ -415,7 +417,9 @@ intrinsic_ParallelTestsShouldPass(JSContext *cx, unsigned argc, Value *vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 #if defined(JS_THREADSAFE) && defined(JS_ION)
     args.rval().setBoolean(ion::IsEnabled(cx) &&
-                           !ion::js_IonOptions.eagerCompilation);
+                           ion::IsBaselineEnabled(cx) &&
+                           !ion::js_IonOptions.eagerCompilation &&
+                           ion::js_IonOptions.baselineUsesBeforeCompile != 0);
 #else
     args.rval().setBoolean(false);
 #endif
@@ -462,7 +466,7 @@ intrinsic_RuntimeDefaultLocale(JSContext *cx, unsigned argc, Value *vp)
     return true;
 }
 
-JSFunctionSpec intrinsic_functions[] = {
+const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("ToObject",             intrinsic_ToObject,             1,0),
     JS_FN("ToInteger",            intrinsic_ToInteger,            1,0),
     JS_FN("IsCallable",           intrinsic_IsCallable,           1,0),
@@ -577,7 +581,8 @@ JSRuntime::finishSelfHosting()
 void
 JSRuntime::markSelfHostingGlobal(JSTracer *trc)
 {
-    MarkObjectRoot(trc, &selfHostingGlobal_, "self-hosting global");
+    if (selfHostingGlobal_)
+        MarkObjectRoot(trc, &selfHostingGlobal_, "self-hosting global");
 }
 
 typedef AutoObjectObjectHashMap CloneMemory;
@@ -613,7 +618,7 @@ CloneProperties(JSContext *cx, HandleObject obj, HandleObject clone, CloneMemory
     return true;
 }
 
-static RawObject
+static JSObject *
 CloneObject(JSContext *cx, HandleObject srcObj, CloneMemory &clonedObjects)
 {
     CloneMemory::AddPtr p = clonedObjects.lookupForAdd(srcObj.get());
@@ -702,7 +707,7 @@ JSRuntime::cloneSelfHostedFunctionScript(JSContext *cx, Handle<PropertyName*> na
     RootedFunction sourceFun(cx, funVal.toObject().toFunction());
     RootedScript sourceScript(cx, sourceFun->nonLazyScript());
     JS_ASSERT(!sourceScript->enclosingStaticScope());
-    RawScript cscript = CloneScript(cx, NullPtr(), targetFun, sourceScript);
+    JSScript *cscript = CloneScript(cx, NullPtr(), targetFun, sourceScript);
     if (!cscript)
         return false;
     targetFun->setScript(cscript);

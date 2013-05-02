@@ -196,17 +196,21 @@ IsPhiObservable(MPhi *phi, Observability observe)
 
     // If the Phi is of the |this| value, it must always be observable.
     uint32_t slot = phi->slot();
-    if (slot == 1)
+    CompileInfo &info = phi->block()->info();
+    if (info.fun() && slot == info.thisSlot())
         return true;
 
     // If the Phi is one of the formal argument, and we are using an argument
     // object in the function. The phi might be observable after a bailout.
     // For inlined frames this is not needed, as they are captured in the inlineResumePoint.
-    CompileInfo &info = phi->block()->info();
     if (info.fun() && info.hasArguments()) {
         uint32_t first = info.firstArgSlot();
-        if (first <= slot && slot - first < info.nargs())
+        if (first <= slot && slot - first < info.nargs()) {
+            // If arguments obj aliases formals, then the arg slots will never be used.
+            if (info.argsObjAliasesFormals())
+                return false;
             return true;
+        }
     }
     return false;
 }
@@ -528,7 +532,7 @@ TypeAnalyzer::adjustPhiInputs(MPhi *phi)
         if (in->type() == MIRType_Value)
             continue;
 
-        if (in->isUnbox()) {
+        if (in->isUnbox() && phi->typeIncludes(in->toUnbox()->input())) {
             // The input is being explicitly unboxed, so sneak past and grab
             // the original box.
             phi->replaceOperand(i, in->toUnbox()->input());
@@ -1271,8 +1275,8 @@ TryEliminateTypeBarrier(MTypeBarrier *barrier, bool *eliminated)
 {
     JS_ASSERT(!*eliminated);
 
-    const types::StackTypeSet *barrierTypes = barrier->typeSet();
-    const types::StackTypeSet *inputTypes = barrier->input()->typeSet();
+    const types::StackTypeSet *barrierTypes = barrier->resultTypeSet();
+    const types::StackTypeSet *inputTypes = barrier->input()->resultTypeSet();
 
     if (!barrierTypes || !inputTypes)
         return true;

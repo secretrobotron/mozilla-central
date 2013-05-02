@@ -26,7 +26,6 @@
 #include "nsGUIEvent.h"
 #include "prprf.h"
 #include "nsIDOMEventListener.h"
-#include "nsIJSContextStack.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsWeakPtr.h"
 #include "nsIScriptGlobalObject.h"
@@ -390,7 +389,7 @@ nsXMLHttpRequest::InitParameters(bool aAnon, bool aSystem)
   // Chrome is always allowed access, so do the permission check only
   // for non-chrome pages.
   if (!nsContentUtils::IsCallerChrome()) {
-    nsCOMPtr<nsIDocument> doc = do_QueryInterface(window->GetExtantDocument());
+    nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
     if (!doc) {
       return;
     }
@@ -560,7 +559,7 @@ static void LogMessage(const char* aWarning, nsPIDOMWindow* aWindow)
 {
   nsCOMPtr<nsIDocument> doc;
   if (aWindow) {
-    doc = do_QueryInterface(aWindow->GetExtantDocument());
+    doc = aWindow->GetExtantDoc();
   }
   nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
                                   "DOM", doc,
@@ -2861,7 +2860,7 @@ nsXMLHttpRequest::Send(nsIVariant* aVariant, const Nullable<RequestBody>& aBody)
         nsCOMPtr<nsPIDOMWindow> suspendedWindow(do_QueryInterface(topWindow));
         if (suspendedWindow &&
             (suspendedWindow = suspendedWindow->GetCurrentInnerWindow())) {
-          suspendedDoc = do_QueryInterface(suspendedWindow->GetExtantDocument());
+          suspendedDoc = suspendedWindow->GetExtantDoc();
           if (suspendedDoc) {
             suspendedDoc->SuppressEventHandling();
           }

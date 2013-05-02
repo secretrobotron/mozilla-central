@@ -8,6 +8,8 @@
  * JS math package.
  */
 
+#include "jsmath.h"
+
 #include "mozilla/Constants.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/MathAlgorithms.h"
@@ -19,13 +21,9 @@
 #include "jsatom.h"
 #include "jscntxt.h"
 #include "jsversion.h"
-#include "jslock.h"
-#include "jsmath.h"
-#include "jsnum.h"
 #include "jslibmath.h"
 #include "jscompartment.h"
 
-#include "jsinferinlines.h"
 #include "jsobjinlines.h"
 
 using namespace js;
@@ -702,7 +700,7 @@ math_toSource(JSContext *cx, unsigned argc, Value *vp)
 }
 #endif
 
-static JSFunctionSpec math_static_methods[] = {
+static const JSFunctionSpec math_static_methods[] = {
 #if JS_HAS_TOSOURCE
     JS_FN(js_toSource_str,  math_toSource,        0, 0),
 #endif

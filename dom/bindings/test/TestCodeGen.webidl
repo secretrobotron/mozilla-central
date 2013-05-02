@@ -20,6 +20,15 @@ callback interface TestCallbackInterface {
   long doSomethingElse(DOMString arg, TestInterface otherArg);
   void doSequenceLongArg(sequence<long> arg);
   void doSequenceStringArg(sequence<DOMString> arg);
+  sequence<long> getSequenceOfLong();
+  sequence<TestInterface> getSequenceOfInterfaces();
+  sequence<TestInterface>? getNullableSequenceOfInterfaces();
+  sequence<TestInterface?> getSequenceOfNullableInterfaces();
+  sequence<TestInterface?>? getNullableSequenceOfNullableInterfaces();
+  sequence<TestCallbackInterface> getSequenceOfCallbackInterfaces();
+  sequence<TestCallbackInterface>? getNullableSequenceOfCallbackInterfaces();
+  sequence<TestCallbackInterface?> getSequenceOfNullableCallbackInterfaces();
+  sequence<TestCallbackInterface?>? getNullableSequenceOfNullableCallbackInterfaces();
 };
 
 callback interface TestSingleOperationCallbackInterface {
@@ -94,7 +103,10 @@ interface OnlyForUseInConstructor {
  Constructor(long arg1, IndirectlyImplementedInterface iface),
  // Constructor(long arg1, long arg2, (TestInterface or OnlyForUseInConstructor) arg3),
  NamedConstructor=Test,
- NamedConstructor=Test(DOMString str)
+ NamedConstructor=Test(DOMString str),
+ NamedConstructor=Test2(DictForConstructor dict, any any1, object obj1,
+                        object? obj2, sequence<Dict> seq, optional any any2,
+                        optional object obj3, optional object? obj4)
  ]
 interface TestInterface {
   // Integer types
@@ -622,6 +634,7 @@ dictionary ParentDict : GrandparentDict {
   long c = 5;
   TestInterface someInterface;
   TestExternalInterface someExternalInterface;
+  any parentAny;
 };
 
 dictionary DictContainingDict {
@@ -631,6 +644,18 @@ dictionary DictContainingDict {
 dictionary DictContainingSequence {
   sequence<long> ourSequence;
   sequence<TestInterface> ourSequence2;
+};
+
+dictionary DictForConstructor {
+  Dict dict;
+  DictContainingDict dict2;
+  sequence<Dict> seq1;
+  sequence<sequence<Dict>>? seq2;
+  sequence<sequence<Dict>?> seq3;
+  // No support for sequences of "any" or "object" as return values yet.
+  object obj1;
+  object? obj2;
+  any any1 = null;
 };
 
 interface TestIndexedGetterInterface {

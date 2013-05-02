@@ -33,6 +33,9 @@ namespace ion {
     _(CreateThis)                                                           \
     _(CreateThisWithProto)                                                  \
     _(CreateThisWithTemplate)                                               \
+    _(CreateArgumentsObject)                                                \
+    _(GetArgumentsObjectArg)                                                \
+    _(SetArgumentsObjectArg)                                                \
     _(PrepareCall)                                                          \
     _(PassArg)                                                              \
     _(Call)                                                                 \
@@ -100,9 +103,12 @@ namespace ion {
     _(TypeBarrier)                                                          \
     _(MonitorTypes)                                                         \
     _(GetPropertyCache)                                                     \
+    _(GetPropertyPolymorphic)                                               \
+    _(SetPropertyPolymorphic)                                               \
     _(GetElementCache)                                                      \
     _(BindNameCache)                                                        \
     _(GuardShape)                                                           \
+    _(GuardObjectType)                                                      \
     _(GuardClass)                                                           \
     _(ArrayLength)                                                          \
     _(TypedArrayLength)                                                     \
@@ -122,8 +128,10 @@ namespace ion {
     _(ArrayConcat)                                                          \
     _(LoadTypedArrayElement)                                                \
     _(LoadTypedArrayElementHole)                                            \
+    _(LoadTypedArrayElementStatic)                                          \
     _(StoreTypedArrayElement)                                               \
     _(StoreTypedArrayElementHole)                                           \
+    _(StoreTypedArrayElementStatic)                                         \
     _(EffectiveAddress)                                                     \
     _(ClampToUint8)                                                         \
     _(LoadFixedSlot)                                                        \
@@ -135,6 +143,7 @@ namespace ion {
     _(CallGetElement)                                                       \
     _(CallSetElement)                                                       \
     _(CallSetProperty)                                                      \
+    _(CallInitElementArray)                                                 \
     _(DeleteProperty)                                                       \
     _(SetPropertyCache)                                                     \
     _(IteratorStart)                                                        \

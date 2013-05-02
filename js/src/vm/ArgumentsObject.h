@@ -125,6 +125,10 @@ class ArgumentsObject : public JSObject
      */
     static ArgumentsObject *createUnexpected(JSContext *cx, StackIter &iter);
     static ArgumentsObject *createUnexpected(JSContext *cx, AbstractFramePtr frame);
+#if defined(JS_ION)
+    static ArgumentsObject *createForIon(JSContext *cx, ion::IonJSFrameLayout *frame,
+                                         HandleObject scopeChain);
+#endif
 
     /*
      * Return the initial length of the arguments.  This may differ from the
@@ -195,8 +199,8 @@ class ArgumentsObject : public JSObject
      */
     inline size_t sizeOfMisc(JSMallocSizeOfFun mallocSizeOf) const;
 
-    static void finalize(FreeOp *fop, RawObject obj);
-    static void trace(JSTracer *trc, RawObject obj);
+    static void finalize(FreeOp *fop, JSObject *obj);
+    static void trace(JSTracer *trc, JSObject *obj);
 
     /* For jit use: */
     static size_t getDataSlotOffset() {
@@ -207,6 +211,10 @@ class ArgumentsObject : public JSObject
     }
 
     static void MaybeForwardToCallObject(AbstractFramePtr frame, JSObject *obj, ArgumentsData *data);
+#if defined(JS_ION)
+    static void MaybeForwardToCallObject(ion::IonJSFrameLayout *frame, HandleObject callObj,
+                                         JSObject *obj, ArgumentsData *data);
+#endif
 };
 
 class NormalArgumentsObject : public ArgumentsObject

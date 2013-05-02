@@ -105,6 +105,9 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitCreateThisWithTemplate(MCreateThisWithTemplate *ins);
     bool visitCreateThisWithProto(MCreateThisWithProto *ins);
     bool visitCreateThis(MCreateThis *ins);
+    bool visitCreateArgumentsObject(MCreateArgumentsObject *ins);
+    bool visitGetArgumentsObjectArg(MGetArgumentsObjectArg *ins);
+    bool visitSetArgumentsObjectArg(MSetArgumentsObjectArg *ins);
     bool visitReturnFromCtor(MReturnFromCtor *ins);
     bool visitCall(MCall *call);
     bool visitApplyArgs(MApplyArgs *apply);
@@ -186,10 +189,13 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitArrayConcat(MArrayConcat *ins);
     bool visitLoadTypedArrayElement(MLoadTypedArrayElement *ins);
     bool visitLoadTypedArrayElementHole(MLoadTypedArrayElementHole *ins);
+    bool visitLoadTypedArrayElementStatic(MLoadTypedArrayElementStatic *ins);
     bool visitClampToUint8(MClampToUint8 *ins);
     bool visitLoadFixedSlot(MLoadFixedSlot *ins);
     bool visitStoreFixedSlot(MStoreFixedSlot *ins);
     bool visitGetPropertyCache(MGetPropertyCache *ins);
+    bool visitGetPropertyPolymorphic(MGetPropertyPolymorphic *ins);
+    bool visitSetPropertyPolymorphic(MSetPropertyPolymorphic *ins);
     bool visitGetElementCache(MGetElementCache *ins);
     bool visitBindNameCache(MBindNameCache *ins);
     bool visitGuardClass(MGuardClass *ins);
@@ -202,6 +208,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitCallsiteCloneCache(MCallsiteCloneCache *ins);
     bool visitCallGetElement(MCallGetElement *ins);
     bool visitCallSetElement(MCallSetElement *ins);
+    bool visitCallInitElementArray(MCallInitElementArray *ins);
     bool visitSetPropertyCache(MSetPropertyCache *ins);
     bool visitCallSetProperty(MCallSetProperty *ins);
     bool visitIteratorStart(MIteratorStart *ins);

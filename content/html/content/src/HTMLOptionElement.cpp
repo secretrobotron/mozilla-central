@@ -43,8 +43,7 @@ NS_NewHTMLOptionElement(already_AddRefed<nsINodeInfo> aNodeInfo,
    */
   nsCOMPtr<nsINodeInfo> nodeInfo(aNodeInfo);
   if (!nodeInfo) {
-    nsCOMPtr<nsIDocument> doc =
-      do_QueryInterface(nsContentUtils::GetDocumentFromCaller());
+    nsCOMPtr<nsIDocument> doc = nsContentUtils::GetDocumentFromCaller();
     NS_ENSURE_TRUE(doc, nullptr);
 
     nodeInfo = doc->NodeInfoManager()->GetNodeInfo(nsGkAtoms::option, nullptr,
@@ -440,7 +439,7 @@ HTMLOptionElement::CopyInnerTo(Element* aDest)
 }
 
 JSObject*
-HTMLOptionElement::WrapNode(JSContext* aCx, JSObject* aScope)
+HTMLOptionElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return HTMLOptionElementBinding::Wrap(aCx, aScope, this);
 }

@@ -16,6 +16,7 @@
 #include "shared-libraries.h"
 #include "mozilla/StackWalk.h"
 #include "TableTicker.h"
+#include "nsXULAppAPI.h"
 
 // JSON
 #include "JSObjectBuilder.h"
@@ -33,6 +34,10 @@
 #include "nsIObserverService.h"
 #include "mozilla/Services.h"
 #include "PlatformMacros.h"
+
+#if defined(SPS_OS_android) && !defined(MOZ_WIDGET_GONK)
+  #include "AndroidBridge.h"
+#endif
 
 // JS
 #include "jsdbgapi.h"
@@ -160,6 +165,68 @@ JSObject* TableTicker::ToJSObject(JSContext *aCx)
   return jsProfile;
 }
 
+struct SubprocessClosure {
+  JSAObjectBuilder* mBuilder;
+  JSCustomArray* mThreads;
+};
+
+void SubProcessCallback(const char* aProfile, void* aClosure)
+{
+  // Called by the observer to get their profile data included
+  // as a sub profile
+  SubprocessClosure* closure = (SubprocessClosure*)aClosure;
+
+  closure->mBuilder->ArrayPush(closure->mThreads, aProfile);
+}
+
+#if defined(SPS_OS_android) && !defined(MOZ_WIDGET_GONK)
+static
+JSCustomObject* BuildJavaThreadJSObject(JSAObjectBuilder& b)
+{
+  JSCustomObject* javaThread = b.CreateObject();
+  b.DefineProperty(javaThread, "name", "Java Main Thread");
+
+  JSCustomArray *samples = b.CreateArray();
+  b.DefineProperty(javaThread, "samples", samples);
+
+  int sampleId = 0;
+  while (true) {
+    int frameId = 0;
+    JSCustomObject *sample = nullptr;
+    JSCustomArray *frames = nullptr;
+    while (true) {
+      nsCString result;
+      bool hasFrame = AndroidBridge::Bridge()->GetFrameNameJavaProfiling(0, sampleId, frameId, result);
+      if (!hasFrame) {
+        if (frames) {
+          b.DefineProperty(sample, "frames", frames);
+        }
+        break;
+      }
+      if (!sample) {
+        sample = b.CreateObject();
+        frames = b.CreateArray();
+        b.DefineProperty(sample, "frames", frames);
+        b.ArrayPush(samples, sample);
+
+        double sampleTime = AndroidBridge::Bridge()->GetSampleTimeJavaProfiling(0, sampleId);
+        b.DefineProperty(sample, "time", sampleTime);
+      }
+      JSCustomObject *frame = b.CreateObject();
+      b.DefineProperty(frame, "location", result.BeginReading());
+      b.ArrayPush(frames, frame);
+      frameId++;
+    }
+    if (frameId == 0) {
+      break;
+    }
+    sampleId++;
+  }
+
+  return javaThread;
+}
+#endif
+
 void TableTicker::BuildJSObject(JSAObjectBuilder& b, JSCustomObject* profile)
 {
   // Put shared library info
@@ -191,8 +258,30 @@ void TableTicker::BuildJSObject(JSAObjectBuilder& b, JSCustomObject* profile)
     }
   }
 
+#if defined(SPS_OS_android) && !defined(MOZ_WIDGET_GONK)
+  if (ProfileJava()) {
+    AndroidBridge::Bridge()->PauseJavaProfiling();
+
+    JSCustomObject* javaThread = BuildJavaThreadJSObject(b);
+    b.ArrayPush(threads, javaThread);
+
+    AndroidBridge::Bridge()->UnpauseJavaProfiling();
+  }
+#endif
+
   SetPaused(false);
-} 
+
+  // Send a event asking any subprocesses (plugins) to
+  // give us their information
+  SubprocessClosure closure;
+  closure.mBuilder = &b;
+  closure.mThreads = threads;
+  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+  if (os) {
+    nsRefPtr<ProfileSaveEvent> pse = new ProfileSaveEvent(SubProcessCallback, &closure);
+    os->NotifyObservers(pse, "profiler-subprocess", nullptr);
+  }
+}
 
 // END SaveProfileTask et al
 ////////////////////////////////////////////////////////////////////////
@@ -452,7 +541,7 @@ void TableTicker::InplaceTick(TickSample* sample)
   }
 
   if (sample) {
-    TimeDuration delta = sample->timestamp - mStartTime;
+    TimeDuration delta = sample->timestamp - sStartTime;
     currThreadProfile.addTag(ProfileEntry('t', delta.ToMilliseconds()));
   }
 

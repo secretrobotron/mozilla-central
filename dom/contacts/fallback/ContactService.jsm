@@ -4,7 +4,7 @@
 
 "use strict";
 
-let DEBUG = false;
+const DEBUG = false;
 function debug(s) { dump("-*- Fallback ContactService component: " + s + "\n"); }
 
 const Cu = Components.utils;
@@ -42,7 +42,8 @@ let ContactService = {
     this._messages = ["Contacts:Find", "Contacts:GetAll", "Contacts:GetAll:SendNow",
                       "Contacts:Clear", "Contact:Save",
                       "Contact:Remove", "Contacts:GetSimContacts",
-                      "Contacts:RegisterForMessages", "child-process-shutdown"];
+                      "Contacts:RegisterForMessages", "child-process-shutdown",
+                      "Contacts:GetRevision"];
     this._children = [];
     this._messages.forEach(function(msgName) {
       ppmm.addMessageListener(msgName, this);
@@ -91,7 +92,6 @@ let ContactService = {
 
     switch (aMessage.name) {
       case "Contacts:Find":
-        DEBUG = false;
         if (!this.assertPermission(aMessage, "contacts-read")) {
           return null;
         }
@@ -114,7 +114,12 @@ let ContactService = {
         }
         this._db.getAll(
           function(aContacts) {
-            mm.sendAsyncMessage("Contacts:GetAll:Next", {cursorId: msg.cursorId, contacts: aContacts});
+            try {
+              mm.sendAsyncMessage("Contacts:GetAll:Next", {cursorId: msg.cursorId, contacts: aContacts});
+            } catch (e) {
+              if (DEBUG) debug("Child is dead, DB should stop sending contacts");
+              throw e;
+            }
           },
           function(aErrorMsg) { mm.sendAsyncMessage("Contacts:Find:Return:KO", { errorMsg: aErrorMsg }); },
           msg.findOptions, msg.cursorId);
@@ -157,7 +162,6 @@ let ContactService = {
         );
         break;
       case "Contacts:Clear":
-        DEBUG = true;
         if (!this.assertPermission(aMessage, "contacts-write")) {
           return null;
         }
@@ -186,6 +190,19 @@ let ContactService = {
                                    contacts: aContacts});
             }
           }.bind(this));
+        break;
+      case "Contacts:GetRevision":
+        if (!this.assertPermission(aMessage, "contacts-read")) {
+          return null;
+        }
+        this._db.getRevision(
+          function(revision) {
+            mm.sendAsyncMessage("Contacts:Revision", {
+              requestID: msg.requestID,
+              revision: revision
+            });
+          }
+        );
         break;
       case "Contacts:RegisterForMessages":
         if (!aMessage.target.assertPermission("contacts-read")) {

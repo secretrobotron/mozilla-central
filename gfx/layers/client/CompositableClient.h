@@ -16,7 +16,6 @@ namespace layers {
 class CompositableChild;
 class CompositableClient;
 class TextureClient;
-class ShadowLayersChild;
 class ImageBridgeChild;
 class ShadowableLayer;
 class CompositableForwarder;
@@ -44,7 +43,7 @@ class CompositableChild;
  *
  * To do in-transaction texture transfer (the default), call
  * ShadowLayerForwarder::Attach(CompositableClient*, ShadowableLayer*). This
- * will let the ShadowLayer on the compositor side know which CompositableHost
+ * will let the LayerComposite on the compositor side know which CompositableHost
  * to use for compositing.
  *
  * To do async texture transfer (like async-video), the CompositableClient

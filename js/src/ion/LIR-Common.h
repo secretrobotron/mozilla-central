@@ -263,6 +263,10 @@ class LNewArray : public LInstructionHelper<1, 0, 0>
   public:
     LIR_HEADER(NewArray)
 
+    const char *extraName() const {
+        return mir()->shouldUseVM() ? "VMCall" : NULL;
+    }
+
     MNewArray *mir() const {
         return mir_->toNewArray();
     }
@@ -272,6 +276,10 @@ class LNewObject : public LInstructionHelper<1, 0, 0>
 {
   public:
     LIR_HEADER(NewObject)
+
+    const char *extraName() const {
+        return mir()->shouldUseVM() ? "VMCall" : NULL;
+    }
 
     MNewObject *mir() const {
         return mir_->toNewObject();
@@ -708,6 +716,71 @@ class LCreateThisWithTemplate : public LInstructionHelper<1, 0, 0>
     MCreateThisWithTemplate *mir() const {
         return mir_->toCreateThisWithTemplate();
     }
+};
+
+// Allocate a new arguments object for the frame.
+class LCreateArgumentsObject : public LCallInstructionHelper<1, 1, 1>
+{
+  public:
+    LIR_HEADER(CreateArgumentsObject)
+
+    LCreateArgumentsObject(const LAllocation &callObj, const LDefinition &temp)
+    {
+        setOperand(0, callObj);
+        setTemp(0, temp);
+    }
+
+    const LAllocation *getCallObject() {
+        return getOperand(0);
+    }
+
+    MCreateArgumentsObject *mir() const {
+        return mir_->toCreateArgumentsObject();
+    }
+};
+
+// Get argument from arguments object.
+class LGetArgumentsObjectArg : public LInstructionHelper<BOX_PIECES, 1, 1>
+{
+  public:
+    LIR_HEADER(GetArgumentsObjectArg)
+
+    LGetArgumentsObjectArg(const LAllocation &argsObj, const LDefinition &temp)
+    {
+        setOperand(0, argsObj);
+        setTemp(0, temp);
+    }
+
+    const LAllocation *getArgsObject() {
+        return getOperand(0);
+    }
+
+    MGetArgumentsObjectArg *mir() const {
+        return mir_->toGetArgumentsObjectArg();
+    }
+};
+
+// Set argument on arguments object.
+class LSetArgumentsObjectArg : public LInstructionHelper<0, 1 + BOX_PIECES, 1>
+{
+  public:
+    LIR_HEADER(SetArgumentsObjectArg)
+
+    LSetArgumentsObjectArg(const LAllocation &argsObj, const LDefinition &temp)
+    {
+        setOperand(0, argsObj);
+        setTemp(0, temp);
+    }
+
+    const LAllocation *getArgsObject() {
+        return getOperand(0);
+    }
+
+    MSetArgumentsObjectArg *mir() const {
+        return mir_->toSetArgumentsObjectArg();
+    }
+
+    static const size_t ValueIndex = 1;
 };
 
 // If the Value is an Object, return unbox(Value).
@@ -1231,6 +1304,10 @@ class LTestVAndBranch : public LInstructionHelper<0, BOX_PIECES, 3>
         setTemp(2, temp2);
     }
 
+    const char *extraName() const {
+        return mir()->operandMightEmulateUndefined() ? "MightEmulateUndefined" : NULL;
+    }
+
     static const size_t Input = 0;
 
     const LAllocation *tempFloat() {
@@ -1252,7 +1329,7 @@ class LTestVAndBranch : public LInstructionHelper<0, BOX_PIECES, 3>
         return ifFalsy_->lir()->label();
     }
 
-    MTest *mir() {
+    MTest *mir() const {
         return mir_->toTest();
     }
 };
@@ -1487,27 +1564,6 @@ class LCompareStrictS : public LInstructionHelper<1, BOX_PIECES + 1, 2>
     }
     const LDefinition *temp1() {
         return getTemp(1);
-    }
-    MCompare *mir() {
-        return mir_->toCompare();
-    }
-};
-
-class LParCompareS : public LCallInstructionHelper<1, 2, 0>
-{
-  public:
-    LIR_HEADER(ParCompareS);
-
-    LParCompareS(const LAllocation &left, const LAllocation &right) {
-        setOperand(0, left);
-        setOperand(1, right);
-    }
-
-    const LAllocation *left() {
-        return getOperand(0);
-    }
-    const LAllocation *right() {
-        return getOperand(1);
     }
     MCompare *mir() {
         return mir_->toCompare();
@@ -1827,7 +1883,13 @@ class LBitOpI : public LInstructionHelper<1, 2, 0>
       : op_(op)
     { }
 
-    JSOp bitop() {
+    const char *extraName() const {
+        if (bitop() == JSOP_URSH && mir_->toUrsh()->canOverflow())
+            return "UrshCanOverflow";
+        return NULL;
+    }
+
+    JSOp bitop() const {
         return op_;
     }
 };
@@ -2093,6 +2155,10 @@ class LAddI : public LBinaryMath<0>
       : recoversInput_(false)
     { }
 
+    const char *extraName() const {
+        return snapshot() ? "OverflowCheck" : NULL;
+    }
+
     virtual bool recoversInput() const {
         return recoversInput_;
     }
@@ -2112,6 +2178,10 @@ class LSubI : public LBinaryMath<0>
     LSubI()
       : recoversInput_(false)
     { }
+
+    const char *extraName() const {
+        return snapshot() ? "OverflowCheck" : NULL;
+    }
 
     virtual bool recoversInput() const {
         return recoversInput_;
@@ -2178,15 +2248,19 @@ class LBinaryV : public LCallInstructionHelper<BOX_PIECES, 2 * BOX_PIECES, 0>
 };
 
 // Adds two string, returning a string.
-class LConcat : public LInstructionHelper<1, 2, 1>
+class LConcat : public LInstructionHelper<1, 2, 4>
 {
   public:
     LIR_HEADER(Concat)
 
-    LConcat(const LAllocation &lhs, const LAllocation &rhs, const LDefinition &temp) {
+    LConcat(const LAllocation &lhs, const LAllocation &rhs, const LDefinition &temp1,
+            const LDefinition &temp2, const LDefinition &temp3, const LDefinition &temp4) {
         setOperand(0, lhs);
         setOperand(1, rhs);
-        setTemp(0, temp);
+        setTemp(0, temp1);
+        setTemp(1, temp2);
+        setTemp(2, temp3);
+        setTemp(3, temp4);
     }
 
     const LAllocation *lhs() {
@@ -2195,8 +2269,17 @@ class LConcat : public LInstructionHelper<1, 2, 1>
     const LAllocation *rhs() {
         return this->getOperand(1);
     }
-    const LDefinition *temp() {
+    const LDefinition *temp1() {
         return this->getTemp(0);
+    }
+    const LDefinition *temp2() {
+        return this->getTemp(1);
+    }
+    const LDefinition *temp3() {
+        return this->getTemp(2);
+    }
+    const LDefinition *temp4() {
+        return this->getTemp(3);
     }
 };
 
@@ -2251,6 +2334,10 @@ class LValueToDouble : public LInstructionHelper<1, BOX_PIECES, 0>
   public:
     LIR_HEADER(ValueToDouble)
     static const size_t Input = 0;
+
+    MToDouble *mir() {
+        return mir_->toToDouble();
+    }
 };
 
 // Convert a value to an int32.
@@ -2278,6 +2365,10 @@ class LValueToInt32 : public LInstructionHelper<1, BOX_PIECES, 1>
       : mode_(mode)
     {
         setTemp(0, temp);
+    }
+
+    const char *extraName() const {
+        return mode() == NORMAL ? "Normal" : "Truncate";
     }
 
     static const size_t Input = 0;
@@ -2731,6 +2822,11 @@ class LLoadElementV : public LInstructionHelper<BOX_PIECES, 2, 0>
         setOperand(0, elements);
         setOperand(1, index);
     }
+
+    const char *extraName() const {
+        return mir()->needsHoleCheck() ? "HoleCheck" : NULL;
+    }
+
     const MLoadElement *mir() const {
         return mir_->toLoadElement();
     }
@@ -2785,6 +2881,11 @@ class LLoadElementHole : public LInstructionHelper<BOX_PIECES, 3, 0>
         setOperand(1, index);
         setOperand(2, initLength);
     }
+
+    const char *extraName() const {
+        return mir()->needsHoleCheck() ? "HoleCheck" : NULL;
+    }
+
     const MLoadElementHole *mir() const {
         return mir_->toLoadElementHole();
     }
@@ -2812,6 +2913,11 @@ class LLoadElementT : public LInstructionHelper<1, 2, 0>
         setOperand(0, elements);
         setOperand(1, index);
     }
+
+    const char *extraName() const {
+        return mir()->needsHoleCheck() ? "HoleCheck" : (mir()->loadDoubles() ? "Doubles" : NULL);
+    }
+
     const MLoadElement *mir() const {
         return mir_->toLoadElement();
     }
@@ -2832,6 +2938,10 @@ class LStoreElementV : public LInstructionHelper<0, 2 + BOX_PIECES, 0>
     LStoreElementV(const LAllocation &elements, const LAllocation &index) {
         setOperand(0, elements);
         setOperand(1, index);
+    }
+
+    const char *extraName() const {
+        return mir()->needsHoleCheck() ? "HoleCheck" : NULL;
     }
 
     static const size_t Value = 2;
@@ -2860,6 +2970,10 @@ class LStoreElementT : public LInstructionHelper<0, 3, 0>
         setOperand(0, elements);
         setOperand(1, index);
         setOperand(2, value);
+    }
+
+    const char *extraName() const {
+        return mir()->needsHoleCheck() ? "HoleCheck" : NULL;
     }
 
     const MStoreElement *mir() const {
@@ -2947,6 +3061,10 @@ class LArrayPopShiftV : public LInstructionHelper<BOX_PIECES, 1, 2>
         setTemp(1, temp1);
     }
 
+    const char *extraName() const {
+        return mir()->mode() == MArrayPopShift::Pop ? "Pop" : "Shift";
+    }
+
     const MArrayPopShift *mir() const {
         return mir_->toArrayPopShift();
     }
@@ -2970,6 +3088,10 @@ class LArrayPopShiftT : public LInstructionHelper<1, 1, 2>
         setOperand(0, object);
         setTemp(0, temp0);
         setTemp(1, temp1);
+    }
+
+    const char *extraName() const {
+        return mir()->mode() == MArrayPopShift::Pop ? "Pop" : "Shift";
     }
 
     const MArrayPopShift *mir() const {
@@ -3110,6 +3232,21 @@ class LLoadTypedArrayElementHole : public LInstructionHelper<BOX_PIECES, 2, 0>
     }
 };
 
+class LLoadTypedArrayElementStatic : public LInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(LoadTypedArrayElementStatic);
+    LLoadTypedArrayElementStatic(const LAllocation &ptr) {
+        setOperand(0, ptr);
+    }
+    MLoadTypedArrayElementStatic *mir() const {
+        return mir_->toLoadTypedArrayElementStatic();
+    }
+    const LAllocation *ptr() {
+        return getOperand(0);
+    }
+};
+
 class LStoreTypedArrayElement : public LInstructionHelper<0, 3, 0>
 {
   public:
@@ -3164,6 +3301,25 @@ class LStoreTypedArrayElementHole : public LInstructionHelper<0, 4, 0>
     }
     const LAllocation *value() {
         return getOperand(3);
+    }
+};
+
+class LStoreTypedArrayElementStatic : public LInstructionHelper<0, 2, 0>
+{
+  public:
+    LIR_HEADER(StoreTypedArrayElementStatic);
+    LStoreTypedArrayElementStatic(const LAllocation &ptr, const LAllocation &value) {
+        setOperand(0, ptr);
+        setOperand(1, value);
+    }
+    MStoreTypedArrayElementStatic *mir() const {
+        return mir_->toStoreTypedArrayElementStatic();
+    }
+    const LAllocation *ptr() {
+        return getOperand(0);
+    }
+    const LAllocation *value() {
+        return getOperand(1);
     }
 };
 
@@ -3372,6 +3528,107 @@ class LGetPropertyCacheT : public LInstructionHelper<1, 1, 1>
     }
     const MGetPropertyCache *mir() const {
         return mir_->toGetPropertyCache();
+    }
+};
+
+// Emit code to load a boxed value from an object's slots if its shape matches
+// one of the shapes observed by the baseline IC, else bails out.
+class LGetPropertyPolymorphicV : public LInstructionHelper<BOX_PIECES, 1, 0>
+{
+  public:
+    LIR_HEADER(GetPropertyPolymorphicV)
+    BOX_OUTPUT_ACCESSORS()
+
+    LGetPropertyPolymorphicV(const LAllocation &obj) {
+        setOperand(0, obj);
+    }
+    const LAllocation *obj() {
+        return getOperand(0);
+    }
+    const MGetPropertyPolymorphic *mir() const {
+        return mir_->toGetPropertyPolymorphic();
+    }
+};
+
+// Emit code to load a typed value from an object's slots if its shape matches
+// one of the shapes observed by the baseline IC, else bails out.
+class LGetPropertyPolymorphicT : public LInstructionHelper<1, 1, 1>
+{
+  public:
+    LIR_HEADER(GetPropertyPolymorphicT)
+
+    LGetPropertyPolymorphicT(const LAllocation &obj, const LDefinition &temp) {
+        setOperand(0, obj);
+        setTemp(0, temp);
+    }
+    const LAllocation *obj() {
+        return getOperand(0);
+    }
+    const LDefinition *temp() {
+        return getTemp(0);
+    }
+    const MGetPropertyPolymorphic *mir() const {
+        return mir_->toGetPropertyPolymorphic();
+    }
+};
+
+// Emit code to store a boxed value to an object's slots if its shape matches
+// one of the shapes observed by the baseline IC, else bails out.
+class LSetPropertyPolymorphicV : public LInstructionHelper<0, 1 + BOX_PIECES, 1>
+{
+  public:
+    LIR_HEADER(SetPropertyPolymorphicV)
+
+    LSetPropertyPolymorphicV(const LAllocation &obj, const LDefinition &temp) {
+        setOperand(0, obj);
+        setTemp(0, temp);
+    }
+
+    static const size_t Value = 1;
+
+    const LAllocation *obj() {
+        return getOperand(0);
+    }
+    const LDefinition *temp() {
+        return getTemp(0);
+    }
+    const MSetPropertyPolymorphic *mir() const {
+        return mir_->toSetPropertyPolymorphic();
+    }
+};
+
+// Emit code to store a typed value to an object's slots if its shape matches
+// one of the shapes observed by the baseline IC, else bails out.
+class LSetPropertyPolymorphicT : public LInstructionHelper<0, 2, 1>
+{
+    MIRType valueType_;
+
+  public:
+    LIR_HEADER(SetPropertyPolymorphicT)
+
+    LSetPropertyPolymorphicT(const LAllocation &obj, const LAllocation &value, MIRType valueType,
+                             const LDefinition &temp)
+      : valueType_(valueType)
+    {
+        setOperand(0, obj);
+        setOperand(1, value);
+        setTemp(0, temp);
+    }
+
+    const LAllocation *obj() {
+        return getOperand(0);
+    }
+    const LAllocation *value() {
+        return getOperand(1);
+    }
+    const LDefinition *temp() {
+        return getTemp(0);
+    }
+    MIRType valueType() const {
+        return valueType_;
+    }
+    const MSetPropertyPolymorphic *mir() const {
+        return mir_->toSetPropertyPolymorphic();
     }
 };
 
@@ -3623,6 +3880,19 @@ class LCallSetElement : public LCallInstructionHelper<0, 1 + 2 * BOX_PIECES, 0>
 
     static const size_t Index = 1;
     static const size_t Value = 1 + BOX_PIECES;
+};
+
+// Call js::InitElementArray.
+class LCallInitElementArray : public LCallInstructionHelper<0, 1 + BOX_PIECES, 0>
+{
+public:
+    LIR_HEADER(CallInitElementArray)
+
+    static const size_t Value = 1;
+
+    const MCallInitElementArray *mir() const {
+        return mir_->toCallInitElementArray();
+    }
 };
 
 // Call a VM function to perform a property or name assignment of a generic value.
@@ -4084,7 +4354,7 @@ class LFunctionBoundary : public LInstructionHelper<0, 0, 1>
         return getTemp(0);
     }
 
-    RawScript script() {
+    JSScript *script() {
         return mir_->toFunctionBoundary()->script();
     }
 

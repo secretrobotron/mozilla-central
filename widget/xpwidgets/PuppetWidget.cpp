@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 
-#include "BasicLayers.h"
+#include "ClientLayerManager.h"
 #include "gfxPlatform.h"
 #if defined(MOZ_ENABLE_D3D10_LAYER)
 # include "LayerManagerD3D10.h"
@@ -15,7 +15,7 @@
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/Hal.h"
 #include "mozilla/layers/CompositorChild.h"
-#include "mozilla/layers/PLayersChild.h"
+#include "mozilla/layers/PLayerTransactionChild.h"
 #include "PuppetWidget.h"
 #include "nsIWidgetListener.h"
 
@@ -304,7 +304,7 @@ PuppetWidget::DispatchEvent(nsGUIEvent* event, nsEventStatus& aStatus)
 }
 
 LayerManager*
-PuppetWidget::GetLayerManager(PLayersChild* aShadowManager,
+PuppetWidget::GetLayerManager(PLayerTransactionChild* aShadowManager,
                               LayersBackend aBackendHint,
                               LayerManagerPersistence aPersistence,
                               bool* aAllowRetaining)
@@ -322,7 +322,7 @@ PuppetWidget::GetLayerManager(PLayersChild* aShadowManager,
     }
 #endif
     if (!mLayerManager) {
-      mLayerManager = new BasicShadowLayerManager(this);
+      mLayerManager = new ClientLayerManager(this);
       mLayerManager->AsShadowForwarder()->SetShadowManager(aShadowManager);
     }
   }
@@ -570,6 +570,11 @@ PuppetWidget::Paint()
 
     if (mozilla::layers::LAYERS_D3D10 == mLayerManager->GetBackendType()) {
       mAttachedWidgetListener->PaintWindow(this, region, 0);
+    } else if (mozilla::layers::LAYERS_CLIENT == mLayerManager->GetBackendType()) {
+      // Do nothing, the compositor will handle drawing
+      if (mTabChild) {
+        mTabChild->NotifyPainted();
+      }
     } else {
       nsRefPtr<gfxContext> ctx = new gfxContext(mSurface);
       ctx->Rectangle(gfxRect(0,0,0,0));

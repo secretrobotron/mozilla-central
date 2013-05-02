@@ -20,9 +20,8 @@ namespace mozilla {
 static const int AUDIO_NODE_STREAM_TRACK_ID = 1;
 
 AudioNodeExternalInputStream::AudioNodeExternalInputStream(AudioNodeEngine* aEngine,
-                                                           MediaStreamGraph::AudioNodeStreamKind aKind,
-                                                           uint32_t aNumberOfInputChannels)
-  : AudioNodeStream(aEngine, aKind, aNumberOfInputChannels)
+                                                           MediaStreamGraph::AudioNodeStreamKind aKind)
+  : AudioNodeStream(aEngine, aKind)
 {
 }
 

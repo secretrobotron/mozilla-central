@@ -23,7 +23,6 @@
 #include "nsPIDOMWindow.h"               // for use in inline functions
 #include "nsPropertyTable.h"             // for member
 #include "nsTHashtable.h"                // for member
-#include "mozilla/dom/DirectionalityUtils.h"
 #include "mozilla/dom/DocumentBinding.h"
 
 class imgIRequest;
@@ -95,6 +94,7 @@ class DOMImplementation;
 class Element;
 struct ElementRegistrationOptions;
 class EventTarget;
+class FrameRequestCallback;
 class GlobalObject;
 class HTMLBodyElement;
 class Link;
@@ -113,8 +113,8 @@ typedef CallbackObjectHolder<NodeFilter, nsIDOMNodeFilter> NodeFilterHolder;
 } // namespace mozilla
 
 #define NS_IDOCUMENT_IID \
-{ 0x8f33bc23, 0x5625, 0x448a, \
-  { 0xb3, 0x38, 0xfe, 0x88, 0x16, 0xe, 0xb3, 0xdb } }
+{ 0x4be4a58d, 0x7fce, 0x4315, \
+  { 0x9d, 0x6c, 0x8e, 0x9f, 0xc7, 0x2e, 0x51, 0xb } };
 
 // Flag for AddStyleSheet().
 #define NS_STYLESHEET_FROM_CATALOG                (1 << 0)
@@ -247,11 +247,8 @@ public:
    */
   already_AddRefed<nsILoadGroup> GetDocumentLoadGroup() const
   {
-    nsILoadGroup *group = nullptr;
-    if (mDocumentLoadGroup)
-      CallQueryReferent(mDocumentLoadGroup.get(), &group);
-
-    return group;
+    nsCOMPtr<nsILoadGroup> group = do_QueryReferent(mDocumentLoadGroup);
+    return group.forget();
   }
 
   /**
@@ -523,10 +520,6 @@ public:
     mSandboxFlags = sandboxFlags;
   }
 
-  inline mozilla::Directionality GetDocumentDirectionality() {
-    return mDirectionality;
-  }
-  
   /**
    * Access HTTP header data (this may also get set from other
    * sources, like HTML META tags).
@@ -641,7 +634,7 @@ protected:
 public:
   // Get the root <html> element, or return null if there isn't one (e.g.
   // if the root isn't <html>)
-  Element* GetHtmlElement();
+  Element* GetHtmlElement() const;
   // Returns the first child of GetHtmlContent which has the given tag,
   // or nullptr if that doesn't exist.
   Element* GetHtmlChildElement(nsIAtom* aTag);
@@ -833,7 +826,7 @@ public:
    */
   nsPIDOMWindow* GetInnerWindow()
   {
-    return mRemovedFromDocShell ? GetInnerWindowInternal() : mWindow;
+    return mRemovedFromDocShell ? nullptr : mWindow;
   }
 
   /**
@@ -1084,11 +1077,8 @@ public:
    */
   already_AddRefed<nsISupports> GetContainer() const
   {
-    nsISupports* container = nullptr;
-    if (mDocumentContainer)
-      CallQueryReferent(mDocumentContainer.get(), &container);
-
-    return container;
+    nsCOMPtr<nsISupports> container = do_QueryReferent(mDocumentContainer);
+    return container.forget();
   }
 
   /**
@@ -1777,11 +1767,14 @@ public:
 
   virtual already_AddRefed<mozilla::dom::UndoManager> GetUndoManager() = 0;
 
-  nsresult ScheduleFrameRequestCallback(nsIFrameRequestCallback* aCallback,
+  typedef mozilla::dom::CallbackObjectHolder<
+    mozilla::dom::FrameRequestCallback,
+    nsIFrameRequestCallback> FrameRequestCallbackHolder;
+  nsresult ScheduleFrameRequestCallback(const FrameRequestCallbackHolder& aCallback,
                                         int32_t *aHandle);
   void CancelFrameRequestCallback(int32_t aHandle);
 
-  typedef nsTArray< nsCOMPtr<nsIFrameRequestCallback> > FrameRequestCallbackList;
+  typedef nsTArray<FrameRequestCallbackHolder> FrameRequestCallbackList;
   /**
    * Put this document's frame request callbacks into the provided
    * list, and forget about them.
@@ -2001,7 +1994,7 @@ public:
   virtual void GetTitle(nsString& aTitle) = 0;
   virtual void SetTitle(const nsAString& aTitle, mozilla::ErrorResult& rv) = 0;
   void GetDir(nsAString& aDirection) const;
-  void SetDir(const nsAString& aDirection, mozilla::ErrorResult& rv);
+  void SetDir(const nsAString& aDirection);
   nsIDOMWindow* GetDefaultView() const
   {
     return GetWindow();
@@ -2116,9 +2109,6 @@ protected:
   // Never ever call this. Only call GetWindow!
   virtual nsPIDOMWindow *GetWindowInternal() const = 0;
 
-  // Never ever call this. Only call GetInnerWindow!
-  virtual nsPIDOMWindow *GetInnerWindowInternal() = 0;
-
   // Never ever call this. Only call GetScriptHandlingObject!
   virtual nsIScriptGlobalObject* GetScriptHandlingObjectInternal() const = 0;
 
@@ -2148,12 +2138,6 @@ protected:
   nsCString GetContentTypeInternal() const
   {
     return mContentType;
-  }
-
-  inline void
-  SetDocumentDirectionality(mozilla::Directionality aDir)
-  {
-    mDirectionality = aDir;
   }
 
   // All document WrapNode implementations MUST call this method.  A
@@ -2335,9 +2319,6 @@ protected:
   // are immutable - see nsSandboxFlags.h for the possible flags.
   uint32_t mSandboxFlags;
 
-  // The root directionality of this document.
-  mozilla::Directionality mDirectionality;
-
   nsCString mContentLanguage;
 private:
   nsCString mContentType;
@@ -2383,29 +2364,7 @@ protected:
 
   nsCOMPtr<nsIDocumentEncoder> mCachedEncoder;
 
-  struct FrameRequest {
-    FrameRequest(nsIFrameRequestCallback* aCallback,
-                 int32_t aHandle) :
-      mCallback(aCallback),
-      mHandle(aHandle)
-    {}
-
-    // Conversion operator so that we can append these to a
-    // FrameRequestCallbackList
-    operator nsIFrameRequestCallback* const () const { return mCallback; }
-
-    // Comparator operators to allow RemoveElementSorted with an
-    // integer argument on arrays of FrameRequest
-    bool operator==(int32_t aHandle) const {
-      return mHandle == aHandle;
-    }
-    bool operator<(int32_t aHandle) const {
-      return mHandle < aHandle;
-    }
-    
-    nsCOMPtr<nsIFrameRequestCallback> mCallback;
-    int32_t mHandle;
-  };
+  struct FrameRequest;
 
   nsTArray<FrameRequest> mFrameRequestCallbacks;
 

@@ -15,6 +15,7 @@ import org.mozilla.gecko.db.BrowserContract.Thumbnails;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.db.BrowserDB.TopSitesCursorWrapper;
 import org.mozilla.gecko.db.BrowserDB.URLColumns;
+import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.util.ActivityResultHandler;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.util.UiAsyncTask;
@@ -25,12 +26,12 @@ import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.ShapeDrawable;
 import android.graphics.drawable.shapes.PathShape;
+import android.net.Uri;
 import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.Log;
@@ -104,8 +105,10 @@ public class TopSitesView extends GridView {
                     return;
                 }
 
-                if (mUriLoadListener != null)
-                    mUriLoadListener.onAboutHomeUriLoad(spec);
+                if (mUriLoadListener != null) {
+                    // Decode "user-entered" URLs before loading them.
+                    mUriLoadListener.onAboutHomeUriLoad(decodeUserEnteredUrl(spec));
+                }
             }
         });
 
@@ -313,7 +316,7 @@ public class TopSitesView extends GridView {
                 if (b == null)
                     continue;
 
-                Bitmap thumbnail = BitmapFactory.decodeByteArray(b, 0, b.length);
+                Bitmap thumbnail = BitmapUtils.decodeByteArray(b);
                 if (thumbnail == null)
                     continue;
 
@@ -520,7 +523,8 @@ public class TopSitesView extends GridView {
     private void openTab(ContextMenuInfo menuInfo, int flags) {
         AdapterContextMenuInfo info = (AdapterContextMenuInfo) menuInfo;
         final TopSitesViewHolder holder = (TopSitesViewHolder) info.targetView.getTag();
-        final String url = holder.getUrl();
+        // Decode "user-entered" URLs before loading them.
+        final String url = decodeUserEnteredUrl(holder.getUrl());
 
         Tabs.getInstance().loadUrl(url, flags);
         Toast.makeText(mActivity, R.string.new_tab_opened, Toast.LENGTH_SHORT).show();
@@ -572,13 +576,26 @@ public class TopSitesView extends GridView {
         }).execute();
     }
 
+    private static String encodeUserEnteredUrl(String url) {
+        return Uri.fromParts("user-entered", url, null).toString();
+    }
+
+    private static String decodeUserEnteredUrl(String url) {
+        Uri uri = Uri.parse(url);
+        if ("user-entered".equals(uri.getScheme())) {
+            return uri.getSchemeSpecificPart();
+        }
+        return url;
+    }
+
     public void editSite(ContextMenuInfo menuInfo) {
         AdapterView.AdapterContextMenuInfo info = (AdapterView.AdapterContextMenuInfo) menuInfo;
         int position = info.position;
         View v = getChildAt(position);
 
         TopSitesViewHolder holder = (TopSitesViewHolder) v.getTag();
-        editSite(holder.getUrl(), position);
+        // Decode "user-entered" URLs before showing them to the user to edit.
+        editSite(decodeUserEnteredUrl(holder.getUrl()), position);
     }
 
     // Edit the site at position. Provide a url to start editing with
@@ -599,8 +616,22 @@ public class TopSitesView extends GridView {
                 final View v = getChildAt(position);
                 final TopSitesViewHolder holder = (TopSitesViewHolder) v.getTag();
 
-                final String title = data.getStringExtra(AwesomeBar.TITLE_KEY);
-                final String url = data.getStringExtra(AwesomeBar.URL_KEY);
+                String title = data.getStringExtra(AwesomeBar.TITLE_KEY);
+                String url = data.getStringExtra(AwesomeBar.URL_KEY);
+
+                // Bail if the user entered an empty string.
+                if (TextUtils.isEmpty(url)) {
+                    return;
+                }
+
+                // If the user manually entered a search term or URL, wrap the value in
+                // a special URI until we can get a valid URL for this bookmark.
+                if (data.getBooleanExtra(AwesomeBar.USER_ENTERED_KEY, false)) {
+                    // Store what the user typed as the bookmark's title.
+                    title = url;
+                    url = encodeUserEnteredUrl(url);
+                }
+
                 clearThumbnailsWithUrl(url);
 
                 holder.setUrl(url);
@@ -625,7 +656,7 @@ public class TopSitesView extends GridView {
                         final byte[] b = c.getBlob(c.getColumnIndexOrThrow(Thumbnails.DATA));
                         Bitmap bitmap = null;
                         if (b != null) {
-                            bitmap = BitmapFactory.decodeByteArray(b, 0, b.length);
+                            bitmap = BitmapUtils.decodeByteArray(b);
                         }
                         c.close();
 

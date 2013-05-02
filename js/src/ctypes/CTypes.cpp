@@ -543,7 +543,7 @@ static JSClass sCDataFinalizerClass = {
 #define CDATAFINALIZERFN_FLAGS \
   (JSPROP_READONLY | JSPROP_PERMANENT)
 
-static JSPropertySpec sCTypeProps[] = {
+static const JSPropertySpec sCTypeProps[] = {
   { "name", 0, CTYPESPROP_FLAGS, JSOP_WRAPPER(CType::NameGetter), JSOP_NULLWRAPPER },
   { "size", 0, CTYPESPROP_FLAGS, JSOP_WRAPPER(CType::SizeGetter), JSOP_NULLWRAPPER },
   { "ptr", 0, CTYPESPROP_FLAGS, JSOP_WRAPPER(CType::PtrGetter), JSOP_NULLWRAPPER },
@@ -551,26 +551,26 @@ static JSPropertySpec sCTypeProps[] = {
   { 0, 0, 0, JSOP_NULLWRAPPER, JSOP_NULLWRAPPER }
 };
 
-static JSFunctionSpec sCTypeFunctions[] = {
+static const JSFunctionSpec sCTypeFunctions[] = {
   JS_FN("array", CType::CreateArray, 0, CTYPESFN_FLAGS),
   JS_FN("toString", CType::ToString, 0, CTYPESFN_FLAGS),
   JS_FN("toSource", CType::ToSource, 0, CTYPESFN_FLAGS),
   JS_FS_END
 };
 
-static JSFunctionSpec sCABIFunctions[] = {
+static const JSFunctionSpec sCABIFunctions[] = {
   JS_FN("toSource", ABI::ToSource, 0, CABIFN_FLAGS),
   JS_FN("toString", ABI::ToSource, 0, CABIFN_FLAGS),
   JS_FS_END
 };
 
-static JSPropertySpec sCDataProps[] = {
+static const JSPropertySpec sCDataProps[] = {
   { "value", 0, JSPROP_SHARED | JSPROP_PERMANENT,
     JSOP_WRAPPER(CData::ValueGetter), JSOP_WRAPPER(CData::ValueSetter) },
   { 0, 0, 0, JSOP_NULLWRAPPER, JSOP_NULLWRAPPER }
 };
 
-static JSFunctionSpec sCDataFunctions[] = {
+static const JSFunctionSpec sCDataFunctions[] = {
   JS_FN("address", CData::Address, 0, CDATAFN_FLAGS),
   JS_FN("readString", CData::ReadString, 0, CDATAFN_FLAGS),
   JS_FN("readStringReplaceMalformed", CData::ReadStringReplaceMalformed, 0, CDATAFN_FLAGS),
@@ -579,11 +579,11 @@ static JSFunctionSpec sCDataFunctions[] = {
   JS_FS_END
 };
 
-static JSPropertySpec sCDataFinalizerProps[] = {
+static const JSPropertySpec sCDataFinalizerProps[] = {
   { 0, 0, 0, JSOP_NULLWRAPPER, JSOP_NULLWRAPPER }
 };
 
-static JSFunctionSpec sCDataFinalizerFunctions[] = {
+static const JSFunctionSpec sCDataFinalizerFunctions[] = {
   JS_FN("dispose",  CDataFinalizer::Methods::Dispose,  0, CDATAFINALIZERFN_FLAGS),
   JS_FN("forget",   CDataFinalizer::Methods::Forget,   0, CDATAFINALIZERFN_FLAGS),
   JS_FN("readString",CData::ReadString, 0, CDATAFINALIZERFN_FLAGS),
@@ -592,33 +592,33 @@ static JSFunctionSpec sCDataFinalizerFunctions[] = {
   JS_FS_END
 };
 
-static JSFunctionSpec sPointerFunction =
+static const JSFunctionSpec sPointerFunction =
   JS_FN("PointerType", PointerType::Create, 1, CTYPESCTOR_FLAGS);
 
-static JSPropertySpec sPointerProps[] = {
+static const JSPropertySpec sPointerProps[] = {
   { "targetType", 0, CTYPESPROP_FLAGS,
     JSOP_WRAPPER(PointerType::TargetTypeGetter), JSOP_NULLWRAPPER },
   { 0, 0, 0, JSOP_NULLWRAPPER, JSOP_NULLWRAPPER }
 };
 
-static JSFunctionSpec sPointerInstanceFunctions[] = {
+static const JSFunctionSpec sPointerInstanceFunctions[] = {
   JS_FN("isNull", PointerType::IsNull, 0, CTYPESFN_FLAGS),
   JS_FN("increment", PointerType::Increment, 0, CTYPESFN_FLAGS),
   JS_FN("decrement", PointerType::Decrement, 0, CTYPESFN_FLAGS),
   JS_FS_END
 };
 
-static JSPropertySpec sPointerInstanceProps[] = {
+static const JSPropertySpec sPointerInstanceProps[] = {
   { "contents", 0, JSPROP_SHARED | JSPROP_PERMANENT,
     JSOP_WRAPPER(PointerType::ContentsGetter),
     JSOP_WRAPPER(PointerType::ContentsSetter) },
   { 0, 0, 0, JSOP_NULLWRAPPER, JSOP_NULLWRAPPER }
 };
 
-static JSFunctionSpec sArrayFunction =
+static const JSFunctionSpec sArrayFunction =
   JS_FN("ArrayType", ArrayType::Create, 1, CTYPESCTOR_FLAGS);
 
-static JSPropertySpec sArrayProps[] = {
+static const JSPropertySpec sArrayProps[] = {
   { "elementType", 0, CTYPESPROP_FLAGS,
     JSOP_WRAPPER(ArrayType::ElementTypeGetter), JSOP_NULLWRAPPER },
   { "length", 0, CTYPESPROP_FLAGS,
@@ -626,40 +626,40 @@ static JSPropertySpec sArrayProps[] = {
   { 0, 0, 0, JSOP_NULLWRAPPER, JSOP_NULLWRAPPER }
 };
 
-static JSFunctionSpec sArrayInstanceFunctions[] = {
+static const JSFunctionSpec sArrayInstanceFunctions[] = {
   JS_FN("addressOfElement", ArrayType::AddressOfElement, 1, CDATAFN_FLAGS),
   JS_FS_END
 };
 
-static JSPropertySpec sArrayInstanceProps[] = {
+static const JSPropertySpec sArrayInstanceProps[] = {
   { "length", 0, JSPROP_SHARED | JSPROP_READONLY | JSPROP_PERMANENT,
     JSOP_WRAPPER(ArrayType::LengthGetter), JSOP_NULLWRAPPER },
   { 0, 0, 0, JSOP_NULLWRAPPER, JSOP_NULLWRAPPER }
 };
 
-static JSFunctionSpec sStructFunction =
+static const JSFunctionSpec sStructFunction =
   JS_FN("StructType", StructType::Create, 2, CTYPESCTOR_FLAGS);
 
-static JSPropertySpec sStructProps[] = {
+static const JSPropertySpec sStructProps[] = {
   { "fields", 0, CTYPESPROP_FLAGS,
     JSOP_WRAPPER(StructType::FieldsArrayGetter), JSOP_NULLWRAPPER },
   { 0, 0, 0, JSOP_NULLWRAPPER, JSOP_NULLWRAPPER }
 };
 
-static JSFunctionSpec sStructFunctions[] = {
+static const JSFunctionSpec sStructFunctions[] = {
   JS_FN("define", StructType::Define, 1, CDATAFN_FLAGS),
   JS_FS_END
 };
 
-static JSFunctionSpec sStructInstanceFunctions[] = {
+static const JSFunctionSpec sStructInstanceFunctions[] = {
   JS_FN("addressOfField", StructType::AddressOfField, 1, CDATAFN_FLAGS),
   JS_FS_END
 };
 
-static JSFunctionSpec sFunctionFunction =
+static const JSFunctionSpec sFunctionFunction =
   JS_FN("FunctionType", FunctionType::Create, 2, CTYPESCTOR_FLAGS);
 
-static JSPropertySpec sFunctionProps[] = {
+static const JSPropertySpec sFunctionProps[] = {
   { "argTypes", 0, CTYPESPROP_FLAGS,
     JSOP_WRAPPER(FunctionType::ArgTypesGetter), JSOP_NULLWRAPPER },
   { "returnType", 0, CTYPESPROP_FLAGS,
@@ -671,7 +671,7 @@ static JSPropertySpec sFunctionProps[] = {
   { 0, 0, 0, JSOP_NULLWRAPPER, JSOP_NULLWRAPPER }
 };
 
-static JSFunctionSpec sFunctionInstanceFunctions[] = {
+static const JSFunctionSpec sFunctionInstanceFunctions[] = {
   JS_FN("call", js_fun_call, 1, CDATAFN_FLAGS),
   JS_FN("apply", js_fun_apply, 2, CDATAFN_FLAGS),
   JS_FS_END
@@ -705,7 +705,7 @@ static JSClass sUInt64Class = {
   JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, Int64Base::Finalize
 };
 
-static JSFunctionSpec sInt64StaticFunctions[] = {
+static const JSFunctionSpec sInt64StaticFunctions[] = {
   JS_FN("compare", Int64::Compare, 2, CTYPESFN_FLAGS),
   JS_FN("lo", Int64::Lo, 1, CTYPESFN_FLAGS),
   JS_FN("hi", Int64::Hi, 1, CTYPESFN_FLAGS),
@@ -713,7 +713,7 @@ static JSFunctionSpec sInt64StaticFunctions[] = {
   JS_FS_END
 };
 
-static JSFunctionSpec sUInt64StaticFunctions[] = {
+static const JSFunctionSpec sUInt64StaticFunctions[] = {
   JS_FN("compare", UInt64::Compare, 2, CTYPESFN_FLAGS),
   JS_FN("lo", UInt64::Lo, 1, CTYPESFN_FLAGS),
   JS_FN("hi", UInt64::Hi, 1, CTYPESFN_FLAGS),
@@ -721,19 +721,19 @@ static JSFunctionSpec sUInt64StaticFunctions[] = {
   JS_FS_END
 };
 
-static JSFunctionSpec sInt64Functions[] = {
+static const JSFunctionSpec sInt64Functions[] = {
   JS_FN("toString", Int64::ToString, 0, CTYPESFN_FLAGS),
   JS_FN("toSource", Int64::ToSource, 0, CTYPESFN_FLAGS),
   JS_FS_END
 };
 
-static JSFunctionSpec sUInt64Functions[] = {
+static const JSFunctionSpec sUInt64Functions[] = {
   JS_FN("toString", UInt64::ToString, 0, CTYPESFN_FLAGS),
   JS_FN("toSource", UInt64::ToSource, 0, CTYPESFN_FLAGS),
   JS_FS_END
 };
 
-static JSPropertySpec sModuleProps[] = {
+static const JSPropertySpec sModuleProps[] = {
   { "errno", 0, JSPROP_SHARED | JSPROP_PERMANENT,
     JSOP_WRAPPER(CData::ErrnoGetter), JSOP_NULLWRAPPER },
 #if defined(XP_WIN)
@@ -743,7 +743,7 @@ static JSPropertySpec sModuleProps[] = {
   { 0, 0, 0, JSOP_NULLWRAPPER, JSOP_NULLWRAPPER }
 };
 
-static JSFunctionSpec sModuleFunctions[] = {
+static const JSFunctionSpec sModuleFunctions[] = {
   JS_FN("CDataFinalizer", CDataFinalizer::Construct, 2, CTYPESFN_FLAGS),
   JS_FN("open", Library::Open, 1, CTYPESFN_FLAGS),
   JS_FN("cast", CData::Cast, 2, CTYPESFN_FLAGS),
@@ -1322,7 +1322,7 @@ JS_InitCTypesClass(JSContext* cx, JSObject *globalArg)
 }
 
 JS_PUBLIC_API(void)
-JS_SetCTypesCallbacks(JSRawObject ctypesObj, JSCTypesCallbacks* callbacks)
+JS_SetCTypesCallbacks(JSObject *ctypesObj, JSCTypesCallbacks* callbacks)
 {
   JS_ASSERT(callbacks);
   JS_ASSERT(IsCTypesGlobal(ctypesObj));
@@ -2291,7 +2291,7 @@ ImplicitConvert(JSContext* cx,
       break;
     }
 
-    JSObject* baseType = PointerType::GetBaseType(targetType);
+    JS::Rooted<JSObject*> baseType(cx, PointerType::GetBaseType(targetType));
     if (sourceData) {
       // First, determine if the targetType is ctypes.void_t.ptr.
       TypeCode sourceCode = CType::GetTypeCode(sourceType);
@@ -2457,12 +2457,12 @@ ImplicitConvert(JSContext* cx,
       }
 
       for (uint32_t i = 0; i < sourceLength; ++i) {
-        js::AutoValueRooter item(cx);
-        if (!JS_GetElement(cx, valObj, i, item.jsval_addr()))
+        RootedValue item(cx);
+        if (!JS_GetElement(cx, valObj, i, item.address()))
           return false;
 
         char* data = intermediate.get() + elementSize * i;
-        if (!ImplicitConvert(cx, item.jsval_value(), baseType, data, false, NULL))
+        if (!ImplicitConvert(cx, item, baseType, data, false, NULL))
           return false;
       }
 
@@ -2539,13 +2539,13 @@ ImplicitConvert(JSContext* cx,
         if (!field)
           return false;
 
-        js::AutoValueRooter prop(cx);
-        if (!JS_GetPropertyById(cx, valObj, id, prop.jsval_addr()))
+        RootedValue prop(cx);
+        if (!JS_GetPropertyById(cx, valObj, id, prop.address()))
           return false;
 
         // Convert the field via ImplicitConvert().
         char* fieldData = intermediate.get() + field->mOffset;
-        if (!ImplicitConvert(cx, prop.jsval_value(), field->mType, fieldData, false, NULL))
+        if (!ImplicitConvert(cx, prop, field->mType, fieldData, false, NULL))
           return false;
 
         ++i;
@@ -2585,8 +2585,8 @@ ExplicitConvert(JSContext* cx, HandleValue val, HandleObject targetType, void* b
   // If ImplicitConvert failed, and there is no pending exception, then assume
   // hard failure (out of memory, or some other similarly serious condition).
   // We store any pending exception in case we need to re-throw it.
-  js::AutoValueRooter ex(cx);
-  if (!JS_GetPendingException(cx, ex.jsval_addr()))
+  RootedValue ex(cx);
+  if (!JS_GetPendingException(cx, ex.address()))
     return false;
 
   // Otherwise, assume soft failure. Clear the pending exception so that we
@@ -2634,7 +2634,7 @@ ExplicitConvert(JSContext* cx, HandleValue val, HandleObject targetType, void* b
   case TYPE_array:
   case TYPE_struct:
     // ImplicitConvert is sufficient. Re-throw the exception it generated.
-    JS_SetPendingException(cx, ex.jsval_value());
+    JS_SetPendingException(cx, ex);
     return false;
   case TYPE_void_t:
   case TYPE_function:
@@ -3747,7 +3747,7 @@ CType::HasInstance(JSContext* cx, JSHandleObject obj, JSMutableHandleValue v, JS
   JS_ASSERT(CType::IsCType(obj));
 
   jsval slot = JS_GetReservedSlot(obj, SLOT_PROTO);
-  JSObject* prototype = &slot.toObject();
+  JS::Rooted<JSObject*> prototype(cx, &slot.toObject());
   JS_ASSERT(prototype);
   JS_ASSERT(CData::IsCDataProto(prototype));
 
@@ -4288,9 +4288,9 @@ ArrayType::ConstructData(JSContext* cx,
       // We were given an object with a .length property.
       // This could be a JS array, or a CData array.
       RootedObject arg(cx, &args[0].toObject());
-      js::AutoValueRooter lengthVal(cx);
-      if (!JS_GetProperty(cx, arg, "length", lengthVal.jsval_addr()) ||
-          !jsvalToSize(cx, lengthVal.jsval_value(), false, &length)) {
+      RootedValue lengthVal(cx);
+      if (!JS_GetProperty(cx, arg, "length", lengthVal.address()) ||
+          !jsvalToSize(cx, lengthVal, false, &length)) {
         JS_ReportError(cx, "argument must be an array object or length");
         return JS_FALSE;
       }
@@ -4644,12 +4644,12 @@ ExtractStructField(JSContext* cx, jsval val, JSObject** typeObj)
     return NULL;
   }
 
-  js::AutoValueRooter propVal(cx);
-  if (!JS_GetPropertyById(cx, obj, nameid, propVal.jsval_addr()))
+  RootedValue propVal(cx);
+  if (!JS_GetPropertyById(cx, obj, nameid, propVal.address()))
     return NULL;
 
-  if (propVal.value().isPrimitive() ||
-      !CType::IsCType(JSVAL_TO_OBJECT(propVal.jsval_value()))) {
+  if (propVal.isPrimitive() ||
+      !CType::IsCType(propVal.toObjectOrNull())) {
     JS_ReportError(cx, "struct field descriptors require a valid name and type");
     return NULL;
   }
@@ -4657,7 +4657,7 @@ ExtractStructField(JSContext* cx, jsval val, JSObject** typeObj)
   // Undefined size or zero size struct members are illegal.
   // (Zero-size arrays are legal as struct members in C++, but libffi will
   // choke on a zero-size struct, so we disallow them.)
-  *typeObj = JSVAL_TO_OBJECT(propVal.jsval_value());
+  *typeObj = propVal.toObjectOrNull();
   size_t size;
   if (!CType::GetSafeSize(*typeObj, &size) || size == 0) {
     JS_ReportError(cx, "struct field types must have defined and nonzero size");
@@ -4772,7 +4772,7 @@ StructType::DefineInternal(JSContext* cx, JSObject* typeObj_, JSObject* fieldsOb
     JS_ReportOutOfMemory(cx);
     return JS_FALSE;
   }
-  js::AutoArrayRooter fieldRoots(cx, fieldRootsArray.length(), 
+  js::AutoArrayRooter fieldRoots(cx, fieldRootsArray.length(),
     fieldRootsArray.begin());
 
   // Process the field types.
@@ -4782,12 +4782,12 @@ StructType::DefineInternal(JSContext* cx, JSObject* typeObj_, JSObject* fieldsOb
     structAlign = 0;
 
     for (uint32_t i = 0; i < len; ++i) {
-      js::AutoValueRooter item(cx);
-      if (!JS_GetElement(cx, fieldsObj, i, item.jsval_addr()))
+      RootedValue item(cx);
+      if (!JS_GetElement(cx, fieldsObj, i, item.address()))
         return JS_FALSE;
 
       RootedObject fieldType(cx, NULL);
-      JSFlatString* flat = ExtractStructField(cx, item.jsval_value(), fieldType.address());
+      JSFlatString* flat = ExtractStructField(cx, item, fieldType.address());
       if (!flat)
         return JS_FALSE;
       Rooted<JSStableString*> name(cx, flat->ensureStable(cx));
@@ -7118,7 +7118,7 @@ CDataFinalizer::Methods::Forget(JSContext* cx, unsigned argc, jsval *vp)
     return JS_FALSE;
   }
 
-  JSObject *obj = JS_THIS_OBJECT(cx, vp);
+  JS::Rooted<JSObject*> obj(cx, args.thisv().toObjectOrNull());
   if (!obj)
     return JS_FALSE;
   if (!CDataFinalizer::IsCDataFinalizer(obj)) {

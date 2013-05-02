@@ -387,10 +387,6 @@ inline void
 AutoGCRooter::trace(JSTracer *trc)
 {
     switch (tag_) {
-      case JSVAL:
-        MarkValueRoot(trc, &static_cast<AutoValueRooter *>(this)->val, "JS::AutoValueRooter.val");
-        return;
-
       case PARSER:
         static_cast<frontend::Parser<frontend::FullParseHandler> *>(this)->trace(trc);
         return;
@@ -488,8 +484,8 @@ AutoGCRooter::trace(JSTracer *trc)
       case OBJOBJHASHMAP: {
         AutoObjectObjectHashMap::HashMapImpl &map = static_cast<AutoObjectObjectHashMap *>(this)->map;
         for (AutoObjectObjectHashMap::Enum e(map); !e.empty(); e.popFront()) {
-            mozilla::DebugOnly<RawObject> key = e.front().key;
-            MarkObjectRoot(trc, (RawObject *) &e.front().key, "AutoObjectObjectHashMap key");
+            mozilla::DebugOnly<JSObject *> key = e.front().key;
+            MarkObjectRoot(trc, const_cast<JSObject **>(&e.front().key), "AutoObjectObjectHashMap key");
             JS_ASSERT(key == e.front().key);  // Needs rewriting for moving GC, see bug 726687.
             MarkObjectRoot(trc, &e.front().value, "AutoObjectObjectHashMap value");
         }
@@ -500,8 +496,8 @@ AutoGCRooter::trace(JSTracer *trc)
         AutoObjectUnsigned32HashMap *self = static_cast<AutoObjectUnsigned32HashMap *>(this);
         AutoObjectUnsigned32HashMap::HashMapImpl &map = self->map;
         for (AutoObjectUnsigned32HashMap::Enum e(map); !e.empty(); e.popFront()) {
-            mozilla::DebugOnly<RawObject> key = e.front().key;
-            MarkObjectRoot(trc, (RawObject *) &e.front().key, "AutoObjectUnsignedHashMap key");
+            mozilla::DebugOnly<JSObject *> key = e.front().key;
+            MarkObjectRoot(trc, const_cast<JSObject **>(&e.front().key), "AutoObjectUnsignedHashMap key");
             JS_ASSERT(key == e.front().key);  // Needs rewriting for moving GC, see bug 726687.
         }
         return;
@@ -511,18 +507,16 @@ AutoGCRooter::trace(JSTracer *trc)
         AutoObjectHashSet *self = static_cast<AutoObjectHashSet *>(this);
         AutoObjectHashSet::HashSetImpl &set = self->set;
         for (AutoObjectHashSet::Enum e(set); !e.empty(); e.popFront()) {
-            mozilla::DebugOnly<RawObject> obj = e.front();
-            MarkObjectRoot(trc, (RawObject *) &e.front(), "AutoObjectHashSet value");
+            mozilla::DebugOnly<JSObject *> obj = e.front();
+            MarkObjectRoot(trc, const_cast<JSObject **>(&e.front()), "AutoObjectHashSet value");
             JS_ASSERT(obj == e.front());  // Needs rewriting for moving GC, see bug 726687.
         }
         return;
       }
 
       case HASHABLEVALUE: {
-          /*
-        HashableValue::AutoRooter *rooter = static_cast<HashableValue::AutoRooter *>(this);
+        AutoHashableValueRooter *rooter = static_cast<AutoHashableValueRooter *>(this);
         rooter->trace(trc);
-          */
         return;
       }
 
@@ -624,9 +618,9 @@ JS::CustomAutoRooter::traceValue(JSTracer *trc, JS::Value *thingp, const char *n
 }
 
 void
-HashableValue::AutoRooter::trace(JSTracer *trc)
+AutoHashableValueRooter::trace(JSTracer *trc)
 {
-    MarkValueRoot(trc, reinterpret_cast<Value*>(&v->value), "HashableValue::AutoRooter");
+    MarkValueRoot(trc, reinterpret_cast<Value*>(&value), "AutoHashableValueRooter");
 }
 
 void

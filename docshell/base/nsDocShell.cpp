@@ -65,7 +65,6 @@
 #include "nsIUploadChannel.h"
 #include "nsISecurityEventSink.h"
 #include "nsIScriptSecurityManager.h"
-#include "nsIJSContextStack.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsIScrollableFrame.h"
 #include "nsContentPolicyUtils.h" // NS_CheckContentLoadPolicy(...)
@@ -2760,7 +2759,7 @@ already_AddRefed<nsDocShell>
 nsDocShell::GetParentDocshell()
 {
     nsCOMPtr<nsIDocShell> docshell = do_QueryInterface(GetAsSupports(mParent));
-    return static_cast<nsDocShell*>(docshell.forget().get());
+    return docshell.forget().downcast<nsDocShell>();
 }
 
 nsresult
@@ -7048,10 +7047,7 @@ nsDocShell::CanSavePresentation(uint32_t aLoadType,
 
     // If the document does not want its presentation cached, then don't.
     nsCOMPtr<nsIDocument> doc = mScriptGlobal->GetExtantDoc();
-    if (!doc || !doc->CanSavePresentation(aNewRequest))
-        return false;
-
-    return true;
+    return doc && doc->CanSavePresentation(aNewRequest);
 }
 
 void
@@ -8677,8 +8673,7 @@ nsDocShell::InternalLoad(nsIURI * aURI,
             // document in |newWin|, if any.
             nsCOMPtr<nsPIDOMWindow> piNewWin = do_QueryInterface(newWin);
             if (piNewWin) {
-                nsCOMPtr<nsIDocument> newDoc =
-                    do_QueryInterface(piNewWin->GetExtantDocument());
+                nsCOMPtr<nsIDocument> newDoc = piNewWin->GetExtantDoc();
                 if (!newDoc || newDoc->IsInitialDocument()) {
                     isNewWindow = true;
                     aFlags |= INTERNAL_LOAD_FLAGS_FIRST_LOAD;

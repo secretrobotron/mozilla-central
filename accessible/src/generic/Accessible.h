@@ -150,10 +150,8 @@ public:
    */
   inline already_AddRefed<nsIDOMNode> DOMNode() const
   {
-    nsIDOMNode *DOMNode = nullptr;
-    if (GetNode())
-      CallQueryInterface(GetNode(), &DOMNode);
-    return DOMNode;
+    nsCOMPtr<nsIDOMNode> DOMNode = do_QueryInterface(GetNode());
+    return DOMNode.forget();
   }
 
   /**
@@ -487,6 +485,8 @@ public:
 
   bool IsHTMLListItem() const { return mType == eHTMLLiType; }
   HTMLLIAccessible* AsHTMLListItem();
+
+  bool IsHTMLOptGroup() const { return mType == eHTMLOptGroupType; }
 
   bool IsHTMLTable() const { return mType == eHTMLTableType; }
   bool IsHTMLTableRow() const { return mType == eHTMLTableRowType; }
@@ -872,7 +872,7 @@ protected:
 
   /**
    * Return the action rule based on ARIA enum constants EActionRule
-   * (see nsARIAMap.h). Used by ActionCount() and GetActionName().
+   * (see ARIAMap.h). Used by ActionCount() and GetActionName().
    */
   uint32_t GetActionRule();
 

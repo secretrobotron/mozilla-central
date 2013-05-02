@@ -411,7 +411,7 @@ BaselineCompiler::emitUseCountIncrement()
     // Emit no use count increments or bailouts if Ion is not
     // enabled, or if the script will never be Ion-compileable
 
-    if (!ionCompileable_)
+    if (!ionCompileable_ && !ionOSRCompileable_)
         return true;
 
     Register scriptReg = R2.scratchReg();
@@ -1689,7 +1689,7 @@ BaselineCompiler::getScopeCoordinateAddress(Register reg)
     for (unsigned i = sc.hops; i; i--)
         masm.extractObject(Address(reg, ScopeObject::offsetOfEnclosingScope()), reg);
 
-    RawShape shape = ScopeCoordinateToStaticScopeShape(cx, script, pc);
+    Shape *shape = ScopeCoordinateToStaticScopeShape(cx, script, pc);
     Address addr;
     if (shape->numFixedSlots() <= sc.slot) {
         masm.loadPtr(Address(reg, JSObject::offsetOfSlots()), reg);

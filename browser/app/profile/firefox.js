@@ -903,24 +903,15 @@ pref("toolbar.customization.usesheet", true);
 pref("toolbar.customization.usesheet", false);
 #endif
 
-// The default for this pref reflects whether the build is capable of IPC.
-// (Turning it on in a no-IPC build will have no effect.)
 #ifdef XP_MACOSX
-// i386 ipc preferences
-pref("dom.ipc.plugins.enabled.i386", false);
-pref("dom.ipc.plugins.enabled.i386.flash player.plugin", true);
-pref("dom.ipc.plugins.enabled.i386.javaplugin2_npapi.plugin", true);
-pref("dom.ipc.plugins.enabled.i386.javaappletplugin.plugin", true);
-pref("dom.ipc.plugins.enabled.i386.silverlight.plugin", true);
-// x86_64 ipc preferences
+// On mac, the default pref is per-architecture
+pref("dom.ipc.plugins.enabled.i386", true);
 pref("dom.ipc.plugins.enabled.x86_64", true);
 #else
 pref("dom.ipc.plugins.enabled", true);
 #endif
 
-#ifdef MOZ_E10S_COMPAT
-pref("browser.tabs.remote", true);
-#endif
+pref("browser.tabs.remote", false);
 
 // This pref governs whether we attempt to work around problems caused by
 // plugins using OS calls to manipulate the cursor while running out-of-
@@ -1084,6 +1075,7 @@ pref("devtools.netmonitor.enabled", true);
 
 // The default Network Monitor UI settings
 pref("devtools.netmonitor.panes-network-details-width", 450);
+pref("devtools.netmonitor.panes-network-details-height", 450);
 
 // Enable the Tilt inspector
 pref("devtools.tilt.enabled", true);
@@ -1128,6 +1120,8 @@ pref("devtools.webconsole.filter.error", true);
 pref("devtools.webconsole.filter.warn", true);
 pref("devtools.webconsole.filter.info", true);
 pref("devtools.webconsole.filter.log", true);
+pref("devtools.webconsole.filter.secerror", true);
+pref("devtools.webconsole.filter.secwarn", true);
 
 // Text size in the Web Console. Use 0 for the system default size.
 pref("devtools.webconsole.fontSize", 0);

@@ -19,6 +19,15 @@
 namespace mozilla {
 namespace dom {
 
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(ScriptProcessorNode, AudioNode)
+  if (tmp->Context()) {
+    tmp->Context()->UnregisterScriptProcessorNode(tmp);
+  }
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ScriptProcessorNode, AudioNode)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(ScriptProcessorNode)
 NS_INTERFACE_MAP_END_INHERITING(AudioNode)
 
@@ -179,8 +188,10 @@ public:
                                  AudioChunk* aOutput,
                                  bool* aFinished) MOZ_OVERRIDE
   {
+    MutexAutoLock lock(NodeMutex());
+
     // If our node is dead, just output silence
-    if (!mNode) {
+    if (!Node()) {
       aOutput->SetNull(WEBAUDIO_BLOCK_SIZE);
       return;
     }
@@ -192,9 +203,10 @@ public:
                 aInput.GetDuration());
       } else {
         mSeenNonSilenceInput = true;
-        PodCopy(mInputChannels[i] + mInputWriteIndex,
-                static_cast<const float*>(aInput.mChannelData[i]),
-                aInput.GetDuration());
+        MOZ_ASSERT(aInput.GetDuration() == WEBAUDIO_BLOCK_SIZE, "sanity check");
+        AudioBlockCopyChannelWithScale(static_cast<const float*>(aInput.mChannelData[i]),
+                                       aInput.mVolume,
+                                       mInputChannels[i] + mInputWriteIndex);
       }
     }
     mInputWriteIndex += aInput.GetDuration();
@@ -265,8 +277,16 @@ private:
           return NS_OK;
         }
 
-        nsRefPtr<ScriptProcessorNode> node = static_cast<ScriptProcessorNode*>(mStream->Engine()->Node());
-        if (!node) {
+        nsRefPtr<ScriptProcessorNode> node;
+        {
+          // No need to keep holding the lock for the whole duration of this
+          // function, since we're holding a strong reference to it, so if
+          // we can obtain the reference, we will hold the node alive in
+          // this function.
+          MutexAutoLock lock(mStream->Engine()->NodeMutex());
+          node = static_cast<ScriptProcessorNode*>(mStream->Engine()->Node());
+        }
+        if (!node || !node->Context()) {
           return NS_OK;
         }
 
@@ -339,7 +359,10 @@ ScriptProcessorNode::ScriptProcessorNode(AudioContext* aContext,
                                          uint32_t aBufferSize,
                                          uint32_t aNumberOfInputChannels,
                                          uint32_t aNumberOfOutputChannels)
-  : AudioNode(aContext)
+  : AudioNode(aContext,
+              aNumberOfInputChannels,
+              mozilla::dom::ChannelCountMode::Explicit,
+              mozilla::dom::ChannelInterpretation::Speakers)
   , mSharedBuffers(new SharedBuffers())
   , mBufferSize(aBufferSize ?
                   aBufferSize : // respect what the web developer requested
@@ -352,13 +375,19 @@ ScriptProcessorNode::ScriptProcessorNode(AudioContext* aContext,
                                   aContext->Destination(),
                                   BufferSize(),
                                   aNumberOfInputChannels);
-  mStream = aContext->Graph()->CreateAudioNodeStream(engine, MediaStreamGraph::INTERNAL_STREAM,
-                                                     aNumberOfInputChannels);
+  mStream = aContext->Graph()->CreateAudioNodeStream(engine, MediaStreamGraph::INTERNAL_STREAM);
   engine->SetSourceStream(static_cast<AudioNodeStream*> (mStream.get()));
 }
 
+ScriptProcessorNode::~ScriptProcessorNode()
+{
+  if (Context()) {
+    Context()->UnregisterScriptProcessorNode(this);
+  }
+}
+
 JSObject*
-ScriptProcessorNode::WrapObject(JSContext* aCx, JSObject* aScope)
+ScriptProcessorNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return ScriptProcessorNodeBinding::Wrap(aCx, aScope, this);
 }

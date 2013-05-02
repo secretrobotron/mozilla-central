@@ -50,6 +50,9 @@
     _(CreateThis)                   \
     _(CreateThisWithProto)          \
     _(CreateThisWithTemplate)       \
+    _(CreateArgumentsObject)        \
+    _(GetArgumentsObjectArg)        \
+    _(SetArgumentsObjectArg)        \
     _(ReturnFromCtor)               \
     _(BitNotI)                      \
     _(BitNotV)                      \
@@ -73,7 +76,6 @@
     _(CompareDAndBranch)            \
     _(CompareS)                     \
     _(CompareStrictS)               \
-    _(ParCompareS)                  \
     _(CompareB)                     \
     _(CompareBAndBranch)            \
     _(CompareV)                     \
@@ -131,6 +133,7 @@
     _(StoreSlotV)                   \
     _(StoreSlotT)                   \
     _(GuardShape)                   \
+    _(GuardObjectType)              \
     _(GuardClass)                   \
     _(ParWriteGuard)                \
     _(ParDump)                      \
@@ -155,8 +158,10 @@
     _(StoreElementHoleT)            \
     _(LoadTypedArrayElement)        \
     _(LoadTypedArrayElementHole)    \
+    _(LoadTypedArrayElementStatic)  \
     _(StoreTypedArrayElement)       \
     _(StoreTypedArrayElementHole)   \
+    _(StoreTypedArrayElementStatic) \
     _(EffectiveAddress)             \
     _(ClampIToUint8)                \
     _(ClampDToUint8)                \
@@ -169,6 +174,8 @@
     _(ParSlice)                     \
     _(GetPropertyCacheV)            \
     _(GetPropertyCacheT)            \
+    _(GetPropertyPolymorphicV)      \
+    _(GetPropertyPolymorphicT)      \
     _(GetElementCacheV)             \
     _(GetElementCacheT)             \
     _(BindNameCache)                \
@@ -178,10 +185,13 @@
     _(CallsiteCloneCache)           \
     _(CallGetElement)               \
     _(CallSetElement)               \
+    _(CallInitElementArray)         \
     _(CallSetProperty)              \
     _(CallDeleteProperty)           \
     _(SetPropertyCacheV)            \
     _(SetPropertyCacheT)            \
+    _(SetPropertyPolymorphicV)      \
+    _(SetPropertyPolymorphicT)      \
     _(CallIteratorStart)            \
     _(IteratorStart)                \
     _(IteratorNext)                 \

@@ -27,8 +27,7 @@ class AudioNodeExternalInputStream : public AudioNodeStream {
 public:
 
   AudioNodeExternalInputStream(AudioNodeEngine* aEngine,
-                               MediaStreamGraph::AudioNodeStreamKind aKind,
-                               uint32_t aNumberOfInputChannels = 0);
+                               MediaStreamGraph::AudioNodeStreamKind aKind);
 
   ~AudioNodeExternalInputStream();
 

@@ -35,7 +35,6 @@
 
 #include "nsRuleData.h"
 
-#include "nsIJSContextStack.h"
 #include "nsIDOMHTMLMapElement.h"
 #include "nsEventDispatcher.h"
 
@@ -52,8 +51,7 @@ NS_NewHTMLImageElement(already_AddRefed<nsINodeInfo> aNodeInfo,
    */
   nsCOMPtr<nsINodeInfo> nodeInfo(aNodeInfo);
   if (!nodeInfo) {
-    nsCOMPtr<nsIDocument> doc =
-      do_QueryInterface(nsContentUtils::GetDocumentFromCaller());
+    nsCOMPtr<nsIDocument> doc = nsContentUtils::GetDocumentFromCaller();
     NS_ENSURE_TRUE(doc, nullptr);
 
     nodeInfo = doc->NodeInfoManager()->GetNodeInfo(nsGkAtoms::img, nullptr,
@@ -572,7 +570,7 @@ HTMLImageElement::GetCORSMode()
 }
 
 JSObject*
-HTMLImageElement::WrapNode(JSContext* aCx, JSObject* aScope)
+HTMLImageElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return HTMLImageElementBinding::Wrap(aCx, aScope, this);
 }

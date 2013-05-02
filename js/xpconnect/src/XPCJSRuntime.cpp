@@ -24,6 +24,7 @@
 #include "nsLayoutStatics.h"
 #include "nsContentUtils.h"
 #include "nsCCUncollectableMarker.h"
+#include "nsCycleCollectorUtils.h"
 #include "nsScriptLoader.h"
 #include "jsfriendapi.h"
 #include "js/MemoryMetrics.h"
@@ -43,6 +44,7 @@
 
 using namespace mozilla;
 using namespace xpc;
+using namespace JS;
 
 /***************************************************************************/
 
@@ -487,8 +489,8 @@ XPCJSRuntime::SuspectWrappedNative(XPCWrappedNative *wrapper,
     if (!wrapper->IsValid() || wrapper->IsWrapperExpired())
         return;
 
-    NS_ASSERTION(NS_IsMainThread() || NS_IsCycleCollectorThread(),
-                 "Suspecting wrapped natives from non-CC thread");
+    MOZ_ASSERT(NS_IsMainThread() || NS_IsCycleCollectorThread(),
+               "Suspecting wrapped natives from non-CC thread");
 
     // Only record objects that might be part of a cycle as roots, unless
     // the callback wants all traces (a debug feature).
@@ -2232,7 +2234,8 @@ class XPCJSRuntimeStats : public JS::RuntimeStats
         JSCompartment *comp = js::GetAnyCompartmentInZone(zone);
         xpc::ZoneStatsExtras *extras = new xpc::ZoneStatsExtras;
         extras->pathPrefix.AssignLiteral("explicit/js-non-window/zones/");
-        if (JSObject *global = JS_GetGlobalForCompartmentOrNull(cx, comp)) {
+        RootedObject global(cx, JS_GetGlobalForCompartmentOrNull(cx, comp));
+        if (global) {
             // Need to enter the compartment, otherwise GetNativeOfWrapper()
             // might crash.
             JSAutoCompartment ac(cx, global);
@@ -2246,7 +2249,7 @@ class XPCJSRuntimeStats : public JS::RuntimeStats
             }
         }
 
-        extras->pathPrefix += nsPrintfCString("zone(%p)/", (void *)zone);
+        extras->pathPrefix += nsPrintfCString("zone(0x%p)/", (void *)zone);
 
         zStats->extra = extras;
     }
@@ -2262,7 +2265,8 @@ class XPCJSRuntimeStats : public JS::RuntimeStats
         nsXPConnect *xpc = nsXPConnect::GetXPConnect();
         JSContext *cx = xpc->GetSafeJSContext();
         bool needZone = true;
-        if (JSObject *global = JS_GetGlobalForCompartmentOrNull(cx, c)) {
+        RootedObject global(cx, JS_GetGlobalForCompartmentOrNull(cx, c));
+        if (global) {
             // Need to enter the compartment, otherwise GetNativeOfWrapper()
             // might crash.
             JSAutoCompartment ac(cx, global);
@@ -2495,13 +2499,14 @@ CompartmentNameCallback(JSRuntime *rt, JSCompartment *comp,
 bool XPCJSRuntime::gXBLScopesEnabled;
 
 static bool
-PreserveWrapper(JSContext *cx, JSObject *obj)
+PreserveWrapper(JSContext *cx, JSObject *objArg)
 {
     MOZ_ASSERT(cx);
-    MOZ_ASSERT(obj);
-    MOZ_ASSERT(js::GetObjectClass(obj)->ext.isWrappedNative ||
-               mozilla::dom::IsDOMObject(obj));
+    MOZ_ASSERT(objArg);
+    MOZ_ASSERT(js::GetObjectClass(objArg)->ext.isWrappedNative ||
+               mozilla::dom::IsDOMObject(objArg));
 
+    RootedObject obj(cx, objArg);
     XPCCallContext ccx(NATIVE_CALLER, cx);
     if (!ccx.IsValid())
         return false;
@@ -2687,6 +2692,12 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
     // between optimized and debug builds. Also, ASan requires more stack space
     // due to redzones
     JS_SetNativeStackQuota(mJSRuntime, 2 * 128 * sizeof(size_t) * 1024);
+#elif defined(XP_WIN)
+    // 1MB is the default stack size on Windows
+    JS_SetNativeStackQuota(mJSRuntime, 900 * 1024);
+#elif defined(XP_MACOSX) || defined(DARWIN)
+    // 8MB is the default stack size on MacOS
+    JS_SetNativeStackQuota(mJSRuntime, 7 * 1024 * 1024);
 #else
     JS_SetNativeStackQuota(mJSRuntime, 128 * sizeof(size_t) * 1024);
 #endif
@@ -2812,8 +2823,9 @@ XPCJSRuntime::OnJSContextNew(JSContext *cx)
             // Scope the JSAutoRequest so it goes out of scope before calling
             // mozilla::dom::binding::DefineStaticJSVals.
             JSAutoRequest ar(cx);
+            RootedString str(cx);
             for (unsigned i = 0; i < IDX_TOTAL_COUNT; i++) {
-                JSString* str = JS_InternString(cx, mStrings[i]);
+                str = JS_InternString(cx, mStrings[i]);
                 if (!str || !JS_ValueToId(cx, STRING_TO_JSVAL(str), &mStrIDs[i])) {
                     mStrIDs[0] = JSID_VOID;
                     return false;
@@ -3005,12 +3017,12 @@ JSObject *
 XPCJSRuntime::GetJunkScope()
 {
     if (!mJunkScope) {
-        JS::Value v;
         SafeAutoJSContext cx;
         SandboxOptions options(cx);
         options.sandboxName.AssignASCII("XPConnect Junk Compartment");
         JSAutoRequest ac(cx);
-        nsresult rv = xpc_CreateSandboxObject(cx, &v,
+        RootedValue v(cx);
+        nsresult rv = xpc_CreateSandboxObject(cx, v.address(),
                                               nsContentUtils::GetSystemPrincipal(),
                                               options);
 

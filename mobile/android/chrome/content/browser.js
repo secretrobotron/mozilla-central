@@ -138,6 +138,12 @@ const kDefaultCSSViewportHeight = 480;
 
 const kViewportRemeasureThrottle = 500;
 
+const kDoNotTrackPrefState = Object.freeze({
+  NO_PREF: "0",
+  DISALLOW_TRACKING: "1",
+  ALLOW_TRACKING: "2",
+});
+
 function dump(a) {
   Cc["@mozilla.org/consoleservice;1"].getService(Ci.nsIConsoleService).logStringMessage(a);
 }
@@ -148,6 +154,24 @@ function getBridge() {
 
 function sendMessageToJava(aMessage) {
   return getBridge().handleGeckoMessage(JSON.stringify(aMessage));
+}
+
+function doChangeMaxLineBoxWidth(aWidth) {
+  gReflowPending = null;
+  let webNav = BrowserApp.selectedTab.window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIWebNavigation);
+  let docShell = webNav.QueryInterface(Ci.nsIDocShell);
+  let docViewer = docShell.contentViewer.QueryInterface(Ci.nsIMarkupDocumentViewer);
+
+  let range = null;
+  if (BrowserApp.selectedTab._mReflozPoint) {
+    range = BrowserApp.selectedTab._mReflozPoint.range;
+  }
+
+  docViewer.changeMaxLineBoxWidth(aWidth);
+
+  if (range) {
+    BrowserEventHandler._zoomInAndSnapToRange(range);
+  }
 }
 
 function fuzzyEquals(a, b) {
@@ -172,10 +196,10 @@ XPCOMUtils.defineLazyGetter(this, "Rect", function() {
 });
 
 function resolveGeckoURI(aURI) {
-  if (aURI.indexOf("chrome://") == 0) {
+  if (aURI.startsWith("chrome://")) {
     let registry = Cc['@mozilla.org/chrome/chrome-registry;1'].getService(Ci["nsIChromeRegistry"]);
     return registry.convertChromeURL(Services.io.newURI(aURI, null, null)).spec;
-  } else if (aURI.indexOf("resource://") == 0) {
+  } else if (aURI.startsWith("resource://")) {
     let handler = Services.io.getProtocolHandler("resource").QueryInterface(Ci.nsIResProtocolHandler);
     return handler.resolveURI(Services.io.newURI(aURI, null, null));
   }
@@ -183,7 +207,7 @@ function resolveGeckoURI(aURI) {
 }
 
 function shouldShowProgress(url) {
-  return (url != "about:home" && !/^about:reader/.test(url));
+  return (url != "about:home" && !url.startsWith("about:reader"));
 }
 
 /**
@@ -924,92 +948,105 @@ var BrowserApp = {
   },
 
   getPreferences: function getPreferences(aPrefsRequest, aListen) {
-    try {
-      let prefs = [];
+    let prefs = [];
 
-      for each (let prefName in aPrefsRequest.preferences) {
-        let pref = {
-          name: prefName
-        };
+    for each (let prefName in aPrefsRequest.preferences) {
+      let pref = {
+        name: prefName,
+        type: "",
+        value: null
+      };
 
-        if (aListen) {
-          if (this._prefObservers[prefName])
-            this._prefObservers[prefName].push(aPrefsRequest.requestId);
-          else
-            this._prefObservers[prefName] = [ aPrefsRequest.requestId ];
-          Services.prefs.addObserver(prefName, this, false);
-        }
+      if (aListen) {
+        if (this._prefObservers[prefName])
+          this._prefObservers[prefName].push(aPrefsRequest.requestId);
+        else
+          this._prefObservers[prefName] = [ aPrefsRequest.requestId ];
+        Services.prefs.addObserver(prefName, this, false);
+      }
 
+      // These pref names are not "real" pref names.
+      // They are used in the setting menu,
+      // and these are passed when initializing the setting menu.
+      switch (prefName) {
         // The plugin pref is actually two separate prefs, so
         // we need to handle it differently
-        if (prefName == "plugin.enable") {
-          // Use a string type for java's ListPreference
-          pref.type = "string";
+        case "plugin.enable":
+          pref.type = "string";// Use a string type for java's ListPreference
           pref.value = PluginHelper.getPluginPreference();
           prefs.push(pref);
           continue;
-        } else if (prefName == "privacy.masterpassword.enabled") {
-          // Master password is not a "real" pref
+        // Handle master password
+        case "privacy.masterpassword.enabled":
           pref.type = "bool";
           pref.value = MasterPassword.enabled;
           prefs.push(pref);
           continue;
-        }
+        // Handle do-not-track preference
+        case "privacy.donottrackheader": {
+          pref.type = "string";
 
-        try {
-          switch (Services.prefs.getPrefType(prefName)) {
-            case Ci.nsIPrefBranch.PREF_BOOL:
-              pref.type = "bool";
-              pref.value = Services.prefs.getBoolPref(prefName);
-              break;
-            case Ci.nsIPrefBranch.PREF_INT:
-              pref.type = "int";
-              pref.value = Services.prefs.getIntPref(prefName);
-              break;
-            case Ci.nsIPrefBranch.PREF_STRING:
-            default:
-              pref.type = "string";
-              try {
-                // Try in case it's a localized string (will throw an exception if not)
-                pref.value = Services.prefs.getComplexValue(prefName, Ci.nsIPrefLocalizedString).data;
-              } catch (e) {
-                pref.value = Services.prefs.getCharPref(prefName);
-              }
-              break;
+          let enableDNT = Services.prefs.getBoolPref("privacy.donottrackheader.enabled");
+          if (!enableDNT) {
+            pref.value = kDoNotTrackPrefState.NO_PREF;
+          } else {
+            let dntState = Services.prefs.getIntPref("privacy.donottrackheader.value");
+            pref.value = (dntState === 0) ? kDoNotTrackPrefState.ALLOW_TRACKING :
+                                            kDoNotTrackPrefState.DISALLOW_TRACKING;
           }
-        } catch (e) {
-          dump("Error reading pref [" + prefName + "]: " + e);
-          // preference does not exist; do not send it
+
+          prefs.push(pref);
           continue;
         }
-
-        // some preferences use integers or strings instead of booleans for
-        // indicating enabled/disabled. since the java ui uses the type to
-        // determine which ui elements to show, we need to normalize these
-        // preferences to be actual booleans.
-        switch (prefName) {
-          case "network.cookie.cookieBehavior":
-            pref.type = "string";
-            pref.value = pref.value.toString();
-            break;
-          case "font.size.inflation.minTwips":
-            pref.type = "string";
-            pref.value = pref.value.toString();
-            break;
-        }
-
-        prefs.push(pref);
       }
 
-      sendMessageToJava({
-        type: "Preferences:Data",
-        requestId: aPrefsRequest.requestId,    // opaque request identifier, can be any string/int/whatever
-        preferences: prefs
-      });
+      try {
+        switch (Services.prefs.getPrefType(prefName)) {
+          case Ci.nsIPrefBranch.PREF_BOOL:
+            pref.type = "bool";
+            pref.value = Services.prefs.getBoolPref(prefName);
+            break;
+          case Ci.nsIPrefBranch.PREF_INT:
+            pref.type = "int";
+            pref.value = Services.prefs.getIntPref(prefName);
+            break;
+          case Ci.nsIPrefBranch.PREF_STRING:
+          default:
+            pref.type = "string";
+            try {
+              // Try in case it's a localized string (will throw an exception if not)
+              pref.value = Services.prefs.getComplexValue(prefName, Ci.nsIPrefLocalizedString).data;
+            } catch (e) {
+              pref.value = Services.prefs.getCharPref(prefName);
+            }
+            break;
+        }
+      } catch (e) {
+        dump("Error reading pref [" + prefName + "]: " + e);
+        // preference does not exist; do not send it
+        continue;
+      }
 
-    } catch (e) {
-      dump("Unhandled exception getting prefs: " + e);
+      // Some preferences use integers or strings instead of booleans for
+      // indicating enabled/disabled. Since the Java UI uses the type to
+      // determine which ui elements to show, we need to normalize these
+      // preferences to be actual booleans.
+      switch (prefName) {
+        case "network.cookie.cookieBehavior":
+        case "font.size.inflation.minTwips":
+          pref.type = "string";
+          pref.value = pref.value.toString();
+          break;
+      }
+
+      prefs.push(pref);
     }
+
+    sendMessageToJava({
+      type: "Preferences:Data",
+      requestId: aPrefsRequest.requestId,    // opaque request identifier, can be any string/int/whatever
+      preferences: prefs
+    });
   },
 
   removePreferenceObservers: function removePreferenceObservers(aRequestId) {
@@ -1035,46 +1072,70 @@ var BrowserApp = {
   setPreferences: function setPreferences(aPref) {
     let json = JSON.parse(aPref);
 
-    if (json.name == "plugin.enable") {
+    switch (json.name) {
       // The plugin pref is actually two separate prefs, so
       // we need to handle it differently
-      PluginHelper.setPluginPreference(json.value);
-      return;
-    } else if (json.name == "privacy.masterpassword.enabled") {
-      // MasterPassword pref is not real, we just need take action and leave
-      // MasterPassword pref is not real, we just need take action and leave
-      if (MasterPassword.enabled)
-        MasterPassword.removePassword(json.value);
-      else
-        MasterPassword.setPassword(json.value);
-      return;
-    } else if (json.name == SearchEngines.PREF_SUGGEST_ENABLED) {
-      // Enabling or disabling suggestions will prevent future prompts
-      Services.prefs.setBoolPref(SearchEngines.PREF_SUGGEST_PROMPTED, true);
-    }
+      case "plugin.enable":
+        PluginHelper.setPluginPreference(json.value);
+        return;
 
-    // when sending to java, we normalized special preferences that use
-    // integers and strings to represent booleans.  here, we convert them back
-    // to their actual types so we can store them.
-    switch (json.name) {
-      case "network.cookie.cookieBehavior":
-        json.type = "int";
-        json.value = parseInt(json.value);
+      // MasterPassword pref is not real, we just need take action and leave
+      case "privacy.masterpassword.enabled":
+        if (MasterPassword.enabled)
+          MasterPassword.removePassword(json.value);
+        else
+          MasterPassword.setPassword(json.value);
+        return;
+
+      // "privacy.donottrackheader" is not "real" pref name, it's used in the setting menu.
+      case "privacy.donottrackheader":
+        switch (json.value) {
+          // Don't tell anything about tracking me
+          case kDoNotTrackPrefState.NO_PREF:
+            Services.prefs.setBoolPref("privacy.donottrackheader.enabled", false);
+            Services.prefs.clearUserPref("privacy.donottrackheader.value");
+            break;
+          // Accept tracking me
+          case kDoNotTrackPrefState.ALLOW_TRACKING:
+            Services.prefs.setBoolPref("privacy.donottrackheader.enabled", true);
+            Services.prefs.setIntPref("privacy.donottrackheader.value", 0);
+            break;
+          // Not accept tracking me
+          case kDoNotTrackPrefState.DISALLOW_TRACKING:
+            Services.prefs.setBoolPref("privacy.donottrackheader.enabled", true);
+            Services.prefs.setIntPref("privacy.donottrackheader.value", 1);
+            break;
+        }
+        return;
+
+      // Enabling or disabling suggestions will prevent future prompts
+      case SearchEngines.PREF_SUGGEST_ENABLED:
+        Services.prefs.setBoolPref(SearchEngines.PREF_SUGGEST_PROMPTED, true);
         break;
+
+      // When sending to Java, we normalized special preferences that use
+      // integers and strings to represent booleans. Here, we convert them back
+      // to their actual types so we can store them.
+      case "network.cookie.cookieBehavior":
       case "font.size.inflation.minTwips":
         json.type = "int";
         json.value = parseInt(json.value);
         break;
     }
 
-    if (json.type == "bool") {
-      Services.prefs.setBoolPref(json.name, json.value);
-    } else if (json.type == "int") {
-      Services.prefs.setIntPref(json.name, json.value);
-    } else {
-      let pref = Cc["@mozilla.org/pref-localizedstring;1"].createInstance(Ci.nsIPrefLocalizedString);
-      pref.data = json.value;
-      Services.prefs.setComplexValue(json.name, Ci.nsISupportsString, pref);
+    switch (json.type) {
+      case "bool":
+        Services.prefs.setBoolPref(json.name, json.value);
+        break;
+      case "int":
+        Services.prefs.setIntPref(json.name, json.value);
+        break;
+      default: {
+        let pref = Cc["@mozilla.org/pref-localizedstring;1"].createInstance(Ci.nsIPrefLocalizedString);
+        pref.data = json.value;
+        Services.prefs.setComplexValue(json.name, Ci.nsISupportsString, pref);
+        break;
+      }
     }
   },
 
@@ -2153,7 +2214,7 @@ var UserAgent = {
     if (aUri.schemeIs("http") || aUri.schemeIs("https")) {
       if (this.YOUTUBE_DOMAIN.test(aUri.host)) {
         // Send the phone UA to Youtube if this is a tablet.
-        if (defaultUA.indexOf("Android; Mobile;") === -1)
+        if (!defaultUA.contains("Android; Mobile;"))
           return defaultUA.replace("Android;", "Android; Mobile;");
       }
     }
@@ -2301,6 +2362,7 @@ nsBrowserAccess.prototype = {
 // get created with the right size rather than being 1x1
 let gScreenWidth = 1;
 let gScreenHeight = 1;
+let gReflowPending = null;
 
 // The margins that should be applied to the viewport for fixed position
 // children. This is used to avoid browser chrome permanently obscuring
@@ -2480,14 +2542,18 @@ Tab.prototype = {
   },
 
   performReflowOnZoom: function(aViewport) {
-      let webNav = this.window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIWebNavigation);
-      let docShell = webNav.QueryInterface(Ci.nsIDocShell);
-      let docViewer = docShell.contentViewer.QueryInterface(Ci.nsIMarkupDocumentViewer);
       let viewportWidth = gScreenWidth / aViewport.zoom;
+      let reflozTimeout = Services.prefs.getIntPref("browser.zoom.reflowZoom.reflowTimeout");
+
+      if (gReflowPending) {
+        clearTimeout(gReflowPending);
+      }
 
       // We add in a bit of fudge just so that the end characters don't accidentally
       // get clipped. 15px is an arbitrary choice.
-      docViewer.changeMaxLineBoxWidth(viewportWidth - 15);
+      gReflowPending = setTimeout(doChangeMaxLineBoxWidth,
+                                  reflozTimeout,
+                                  viewportWidth - 15);
   },
 
   /** 
@@ -3035,7 +3101,8 @@ Tab.prototype = {
         // pages and other similar page. This lets us fix bugs like 401575 which
         // require error page UI to do privileged things, without letting error
         // pages have any privilege themselves.
-        if (/^about:/.test(target.documentURI)) {
+        let docURI = target.documentURI;
+        if (docURI.startsWith("about:certerror") || docURI.startsWith("about:blocked")) {
           this.browser.addEventListener("click", ErrorPageEventHandler, true);
           let listener = function() {
             this.browser.removeEventListener("click", ErrorPageEventHandler, true);
@@ -3045,7 +3112,7 @@ Tab.prototype = {
           this.browser.addEventListener("pagehide", listener, true);
         }
 
-        if (/^about:reader/.test(target.documentURI))
+        if (docURI.startsWith("about:reader"))
           new AboutReader(this.browser.contentDocument, this.browser.contentWindow);
 
         break;
@@ -3212,7 +3279,7 @@ Tab.prototype = {
 
         // For low-memory devices, don't allow reader mode since it takes up a lot of memory.
         // See https://bugzilla.mozilla.org/show_bug.cgi?id=792603 for details.
-        if (BrowserApp.isOnLowMemoryPlatform)
+        if (BrowserApp.isOnLowMemoryPlatform && !Services.prefs.getBoolPref("reader.force_allow"))
           return;
 
         // Once document is fully loaded, parse it
@@ -3223,7 +3290,7 @@ Tab.prototype = {
           if (article == null || (article.url != tabURL)) {
             // Don't clear the article for about:reader pages since we want to
             // use the article from the previous page
-            if (!/^about:reader/i.test(tabURL))
+            if (!tabURL.startsWith("about:reader"))
               this.savedArticle = null;
 
             return;
@@ -3315,6 +3382,22 @@ Tab.prototype = {
     this.pluginDoorhangerTimeout = null;
     this.shouldShowPluginDoorhanger = true;
     this.clickToPlayPluginsActivated = false;
+    // Borrowed from desktop Firefox: http://mxr.mozilla.org/mozilla-central/source/browser/base/content/urlbarBindings.xml#174
+    let matchedURL = documentURI.match(/^((?:[a-z]+:\/\/)?(?:[^\/]+@)?)(.+?)(?::\d+)?(?:\/|$)/);
+    let baseDomain = "";
+    if (matchedURL) {
+      var domain = "";
+      [, , domain] = matchedURL;
+
+      try {
+        baseDomain = Services.eTLD.getBaseDomainFromHost(domain);
+        if (!domain.endsWith(baseDomain)) {
+          // getBaseDomainFromHost converts its resultant to ACE.
+          let IDNService = Cc["@mozilla.org/network/idn-service;1"].getService(Ci.nsIIDNService);
+          baseDomain = IDNService.convertACEtoUTF8(baseDomain);
+        }
+      } catch (e) {}
+    }
 
     let message = {
       type: "Content:LocationChange",
@@ -3322,6 +3405,7 @@ Tab.prototype = {
       uri: fixedURI.spec,
       userSearch: this.userSearch || "",
       documentURI: documentURI,
+      baseDomain: baseDomain,
       contentType: (contentType ? contentType : ""),
       sameDocument: sameDocument
     };
@@ -3437,6 +3521,8 @@ Tab.prototype = {
       aMetadata.minZoom *= scaleRatio;
     if (aMetadata.maxZoom > 0)
       aMetadata.maxZoom *= scaleRatio;
+
+    aMetadata.isRTL = this.browser.contentDocument.documentElement.dir == "rtl";
 
     ViewportHandler.setMetadataForDocument(this.browser.contentDocument, aMetadata);
     this.updateViewportSize(gScreenWidth, aInitialLoad);
@@ -3566,6 +3652,7 @@ Tab.prototype = {
       defaultZoom: metadata.defaultZoom || metadata.scaleRatio,
       minZoom: metadata.minZoom || 0,
       maxZoom: metadata.maxZoom || 0,
+      isRTL: metadata.isRTL,
       tabID: this.id
     });
   },
@@ -3890,12 +3977,6 @@ var BrowserEventHandler = {
         this.onPinch(aData);
         break;
 
-      case "MozMagnifyGesture":
-        if (BrowserEventHandler.mReflozPref) {
-          this.onPinchFinish(aData, BrowserApp.selectedTab._mReflozPoint.x, BrowserApp.selectedTab._mReflozPoint.y);
-        }
-        break;
-
       default:
         dump('BrowserEventHandler.handleUserEvent: unexpected topic "' + aTopic + '"');
         break;
@@ -4039,6 +4120,7 @@ var BrowserEventHandler = {
     rect.h = viewport.cssHeight;
 
     sendMessageToJava(rect);
+    BrowserApp.selectedTab._mReflozPoint = null;
    },
 
    onPinch: function(aData) {
@@ -4052,15 +4134,6 @@ var BrowserEventHandler = {
        BrowserApp.selectedTab._mReflozPoint = { x: zoomPointX, y: zoomPointY,
          range: BrowserApp.selectedBrowser.contentDocument.caretPositionFromPoint(zoomPointX, zoomPointY) };
          BrowserApp.selectedTab.probablyNeedRefloz = true;
-     }
-   },
-
-   onPinchFinish: function(aData, aX, aY) {
-     // We only want to do this if reflow-on-zoom is enabled.
-     if (BrowserEventHandler.mReflozPref) {
-       let range = BrowserApp.selectedTab._mReflozPoint.range;
-       this._zoomInAndSnapToRange(range);
-       BrowserApp.selectedTab._mReflozPoint = null;
      }
    },
 
@@ -4454,7 +4527,7 @@ var ErrorPageEventHandler = {
 
         // If the event came from an ssl error page, it is probably either the "Add
         // Exception…" or "Get me out of here!" button
-        if (/^about:certerror\?e=nssBadCert/.test(errorDoc.documentURI)) {
+        if (errorDoc.documentURI.startsWith("about:certerror?e=nssBadCert")) {
           let perm = errorDoc.getElementById("permanentExceptionButton");
           let temp = errorDoc.getElementById("temporaryExceptionButton");
           if (target == temp || target == perm) {
@@ -4475,11 +4548,11 @@ var ErrorPageEventHandler = {
           } else if (target == errorDoc.getElementById("getMeOutOfHereButton")) {
             errorDoc.location = "about:home";
           }
-        } else if (/^about:blocked/.test(errorDoc.documentURI)) {
+        } else if (errorDoc.documentURI.startsWith("about:blocked")) {
           // The event came from a button on a malware/phishing block page
           // First check whether it's malware or phishing, so that we can
           // use the right strings/links
-          let isMalware = /e=malwareBlocked/.test(errorDoc.documentURI);
+          let isMalware = errorDoc.documentURI.contains("e=malwareBlocked");
           let bucketName = isMalware ? "WARNING_MALWARE_PAGE_" : "WARNING_PHISHING_PAGE_";
           let nsISecTel = Ci.nsISecurityUITelemetry;
           let isIframe = (aOwnerDoc.defaultView.parent === aOwnerDoc.defaultView);
@@ -4745,7 +4818,7 @@ var FormAssistant = {
       else if (item.text)
         label = item.text;
 
-      if (filter && label.toLowerCase().indexOf(lowerFieldValue) == -1)
+      if (filter && !(label.toLowerCase().contains(lowerFieldValue)) )
         continue;
       suggestions.push({ label: label, value: item.value });
     }
@@ -5101,6 +5174,8 @@ var ViewportHandler = {
                   (!widthStr && (heightStr == "device-height" || scale == 1.0)));
     }
 
+    let isRTL = aWindow.document.documentElement.dir == "rtl";
+
     return new ViewportMetadata({
       defaultZoom: scale,
       minZoom: minScale,
@@ -5109,7 +5184,8 @@ var ViewportHandler = {
       height: height,
       autoSize: autoSize,
       allowZoom: allowZoom,
-      isSpecified: hasMetaViewport
+      isSpecified: hasMetaViewport,
+      isRTL: isRTL
     });
   },
 
@@ -5181,6 +5257,7 @@ function ViewportMetadata(aMetadata = {}) {
   this.allowZoom = ("allowZoom" in aMetadata) ? aMetadata.allowZoom : true;
   this.isSpecified = ("isSpecified" in aMetadata) ? aMetadata.isSpecified : false;
   this.scaleRatio = ViewportHandler.getScaleRatio();
+  this.isRTL = ("isRTL" in aMetadata) ? aMetadata.isRTL : false;
   Object.seal(this);
 }
 
@@ -5194,6 +5271,7 @@ ViewportMetadata.prototype = {
   allowZoom: null,
   isSpecified: null,
   scaleRatio: null,
+  isRTL: null,
 };
 
 

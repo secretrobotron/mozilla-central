@@ -20,6 +20,10 @@
 #include "mozilla/Services.h"
 #include "nsThreadUtils.h"
 
+#if defined(SPS_OS_android) && !defined(MOZ_WIDGET_GONK)
+  #include "AndroidBridge.h"
+#endif
+
 mozilla::ThreadLocal<PseudoStack *> tlsPseudoStack;
 mozilla::ThreadLocal<TableTicker *> tlsTicker;
 // We need to track whether we've been initialized otherwise
@@ -29,6 +33,7 @@ mozilla::ThreadLocal<TableTicker *> tlsTicker;
 bool stack_key_initialized;
 
 TimeStamp   sLastTracerEvent; // is raced on
+TimeStamp   sStartTime;
 int         sFrameNumber = 0;
 int         sLastFrameNumber = 0;
 int         sInitCount = 0; // Each init must have a matched shutdown.
@@ -345,15 +350,10 @@ char* mozilla_sampler_get_profile()
     return NULL;
   }
 
-  std::stringstream profile;
-  t->SetPaused(true);
-  profile << *(t->GetPrimaryThreadProfile());
-  t->SetPaused(false);
-
-  std::string profileString = profile.str();
-  char *rtn = (char*)malloc( (profileString.length() + 1) * sizeof(char) );
-  strcpy(rtn, profileString.c_str());
-  return rtn;
+  std::stringstream stream;
+  t->ToStreamAsJSON(stream);
+  char* profile = strdup(stream.str().c_str());
+  return profile;
 }
 
 JSObject *mozilla_sampler_get_profile_data(JSContext *aCx)
@@ -383,6 +383,7 @@ const char** mozilla_sampler_get_features()
     // Use a seperate thread of walking the stack.
     "unwinder",
 #endif
+    "java",
     // Only record samples during periods of bad responsiveness
     "jank",
     // Tell the JS engine to emmit pseudostack entries in the
@@ -444,6 +445,17 @@ void mozilla_sampler_start(int aProfileEntries, int aInterval,
         thread_profile->GetPseudoStack()->enableJSSampling();
       }
   }
+
+#if defined(SPS_OS_android) && !defined(MOZ_WIDGET_GONK)
+  if (t->ProfileJava()) {
+    int javaInterval = aInterval;
+    // Java sampling doesn't accuratly keep up with 1ms sampling
+    if (javaInterval < 10) {
+      aInterval = 10;
+    }
+    mozilla::AndroidBridge::Bridge()->StartJavaProfiling(javaInterval, 1000);
+  }
+#endif
 
   sIsProfiling = true;
 
@@ -558,6 +570,12 @@ bool mozilla_sampler_register_thread(const char* aName)
 void mozilla_sampler_unregister_thread()
 {
   Sampler::UnregisterCurrentThread();
+}
+
+double mozilla_sampler_time()
+{
+  TimeDuration delta = TimeStamp::Now() - sStartTime;
+  return delta.ToMilliseconds();
 }
 
 // END externally visible functions

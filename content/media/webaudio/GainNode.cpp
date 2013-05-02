@@ -77,7 +77,7 @@ public:
       float computedGain[WEBAUDIO_BLOCK_SIZE];
       for (size_t counter = 0; counter < WEBAUDIO_BLOCK_SIZE; ++counter) {
         TrackTicks tick = aStream->GetCurrentPosition() + counter;
-        computedGain[counter] = mGain.GetValueAtTime<TrackTicks>(tick);
+        computedGain[counter] = mGain.GetValueAtTime<TrackTicks>(tick) * aInput.mVolume;
       }
 
       // Apply the gain to the output buffer
@@ -95,7 +95,10 @@ public:
 };
 
 GainNode::GainNode(AudioContext* aContext)
-  : AudioNode(aContext)
+  : AudioNode(aContext,
+              2,
+              ChannelCountMode::Max,
+              ChannelInterpretation::Speakers)
   , mGain(new AudioParam(this, SendGainToStream, 1.0f))
 {
   GainNodeEngine* engine = new GainNodeEngine(this, aContext->Destination());
@@ -104,7 +107,7 @@ GainNode::GainNode(AudioContext* aContext)
 }
 
 JSObject*
-GainNode::WrapObject(JSContext* aCx, JSObject* aScope)
+GainNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return GainNodeBinding::Wrap(aCx, aScope, this);
 }

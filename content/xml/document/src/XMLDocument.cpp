@@ -42,7 +42,6 @@
 #include "nsCRT.h"
 #include "nsIAuthPrompt.h"
 #include "nsIScriptGlobalObjectOwner.h"
-#include "nsIJSContextStack.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsContentPolicyUtils.h"
 #include "nsIDOMUserDataHandler.h"
@@ -320,8 +319,7 @@ XMLDocument::Load(const nsAString& aUrl, ErrorResult& aRv)
 
   ReportUseOfDeprecatedMethod(this, "UseOfDOM3LoadMethodWarning");
 
-  nsCOMPtr<nsIDocument> callingDoc =
-    do_QueryInterface(nsContentUtils::GetDocumentFromContext());
+  nsCOMPtr<nsIDocument> callingDoc = nsContentUtils::GetDocumentFromContext();
 
   nsIURI *baseURI = mDocumentURI;
   nsAutoCString charset;
@@ -629,7 +627,7 @@ XMLDocument::Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const
 }
 
 JSObject*
-XMLDocument::WrapNode(JSContext *aCx, JSObject *aScope)
+XMLDocument::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   JSObject* obj = XMLDocumentBinding::Wrap(aCx, aScope, this);
   if (obj && !PostCreateWrapper(aCx, obj)) {

@@ -912,12 +912,11 @@ public:
    * Takes ownership of aEngine.
    */
   AudioNodeStream* CreateAudioNodeStream(AudioNodeEngine* aEngine,
-                                         AudioNodeStreamKind aKind,
-                                         uint32_t aNumberOfInputChannels = 0);
+                                         AudioNodeStreamKind aKind);
+
   AudioNodeExternalInputStream*
   CreateAudioNodeExternalInputStream(AudioNodeEngine* aEngine,
-                                     AudioNodeStreamKind aKind,
-                                     uint32_t aNumberOfInputChannels = 0);
+                                     AudioNodeStreamKind aKind);
   /**
    * Returns the number of graph updates sent. This can be used to track
    * whether a given update has been processed by the graph thread and reflected

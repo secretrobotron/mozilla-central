@@ -94,7 +94,8 @@ public:
   NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsXHREventTarget)
   NS_DECL_NSIXMLHTTPREQUESTUPLOAD
 
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE
   {
     return mozilla::dom::XMLHttpRequestUploadBinding::Wrap(cx, scope, this);
   }
@@ -131,7 +132,8 @@ public:
   nsXMLHttpRequest();
   virtual ~nsXMLHttpRequest();
 
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE
   {
     return mozilla::dom::XMLHttpRequestBinding::Wrap(cx, scope, this);
   }
@@ -169,7 +171,7 @@ public:
   {
     // Pretend like someone passed null, so we can pick up the default values
     mozilla::dom::MozXMLHttpRequestParameters params;
-    if (!params.Init(aCx, JS::NullPtr(), JS::NullValue())) {
+    if (!params.Init(aCx, JS::NullValue())) {
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return nullptr;
     }

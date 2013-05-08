@@ -34,15 +34,15 @@ public:
   virtual void ProduceOutput(GraphTime aFrom, GraphTime aTo);
 
 private:
-  struct ResamplerMapEntry {
+  struct TrackMapEntry {
     SpeexResamplerState* mResampler;
+    TrackTicks mLastTick;
     TrackID mTrackID;
   };
 
-  nsTArray<ResamplerMapEntry> mResamplerMap;
+  nsTArray<TrackMapEntry> mTrackMap;
 
-  SpeexResamplerState* GetTrackResampler(StreamBuffer::Track* aTrack,
-                                         uint32_t aNumberOfInputChannels);
+  TrackMapEntry* GetTrackMap(StreamBuffer::Track* aTrack);
 
   void WriteDataToOutputChunk(StreamBuffer::Track* aInputTrack,
                               AudioChunk* aOutputChunk,

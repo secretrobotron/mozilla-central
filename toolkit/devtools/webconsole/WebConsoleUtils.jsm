@@ -158,31 +158,6 @@ this.WebConsoleUtils = {
   },
 
   /**
-   * Gets the window that has the given outer ID.
-   *
-   * @param integer aOuterId
-   * @param nsIDOMWindow [aHintWindow]
-   *        Optional, the window object used to QueryInterface to
-   *        nsIDOMWindowUtils. If this is not given,
-   *        Services.wm.getMostRecentWindow() is used.
-   * @return nsIDOMWindow|null
-   *         The window object with the given outer ID.
-   */
-  getWindowByOuterId: function WCU_getWindowByOuterId(aOuterId, aHintWindow)
-  {
-    let someWindow = aHintWindow || Services.wm.getMostRecentWindow(null);
-    let content = null;
-
-    if (someWindow) {
-      let windowUtils = someWindow.QueryInterface(Ci.nsIInterfaceRequestor).
-                                   getInterface(Ci.nsIDOMWindowUtils);
-      content = windowUtils.getOuterWindowWithId(aOuterId);
-    }
-
-    return content;
-  },
-
-  /**
    * Abbreviates the given source URL so that it can be displayed flush-right
    * without being too distracting.
    *
@@ -1331,8 +1306,7 @@ PageErrorListener.prototype =
       }
 
       let errorWindow =
-        WebConsoleUtils.getWindowByOuterId(aScriptError.outerWindowID,
-                                           this.window);
+        Services.wm.getOuterWindowWithId(aScriptError.outerWindowID);
       if (!errorWindow || errorWindow.top != this.window) {
         return;
       }
@@ -1471,8 +1445,7 @@ ConsoleAPIListener.prototype =
 
     let apiMessage = aMessage.wrappedJSObject;
     if (this.window) {
-      let msgWindow = WebConsoleUtils.getWindowByOuterId(apiMessage.ID,
-                                                         this.window);
+      let msgWindow = Services.wm.getOuterWindowWithId(apiMessage.ID);
       if (!msgWindow || msgWindow.top != this.window) {
         // Not the same window!
         return;
@@ -1590,7 +1563,20 @@ this.JSTermHelpers = function JSTermHelpers(aOwner)
       if (!window) {
         return null;
       }
-      let target = devtools.TargetFactory.forTab(window.gBrowser.selectedTab);
+
+      let target = null;
+      try {
+        target = devtools.TargetFactory.forTab(window.gBrowser.selectedTab);
+      }
+      catch (ex) {
+        // If we report this exception the user will get it in the Browser
+        // Console every time when she evaluates any string.
+      }
+
+      if (!target) {
+        return null;
+      }
+
       let toolbox = gDevTools.getToolbox(target);
       let panel = toolbox ? toolbox.getPanel("inspector") : null;
       let node = panel ? panel.selection.node : null;

@@ -41,10 +41,10 @@ public:
   NS_FORWARD_NSIDOMNODE_TO_NSINODE
   virtual void GetTextContentInternal(nsAString& aTextContent);
   virtual void SetTextContentInternal(const nsAString& aTextContent,
-                                      mozilla::ErrorResult& aError);
+                                      ErrorResult& aError);
   virtual void GetNodeValueInternal(nsAString& aNodeValue);
   virtual void SetNodeValueInternal(const nsAString& aNodeValue,
-                                    mozilla::ErrorResult& aError);
+                                    ErrorResult& aError);
 
   // nsIDOMAttr interface
   NS_DECL_NSIDOMATTR
@@ -72,10 +72,8 @@ public:
   static void Initialize();
   static void Shutdown();
 
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(Attr,
-                                                         nsIAttribute)
-
-  virtual nsXPCClassInfo* GetClassInfo();
+  NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS_AMBIGUOUS(Attr,
+                                                                   nsIAttribute)
 
   virtual nsIDOMNode* AsDOMNode() { return this; }
 
@@ -97,7 +95,7 @@ public:
   Element* GetOwnerElement(ErrorResult& aRv);
 
 protected:
-  virtual mozilla::dom::Element* GetNameSpaceElement()
+  virtual Element* GetNameSpaceElement()
   {
     return GetContentInternal();
   }
@@ -106,7 +104,7 @@ protected:
 
 private:
   already_AddRefed<nsIAtom> GetNameAtom(nsIContent* aContent);
-  mozilla::dom::Element* GetContentInternal() const;
+  Element* GetContentInternal() const;
 
   nsString mValue;
 };

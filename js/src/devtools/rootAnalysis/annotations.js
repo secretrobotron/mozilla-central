@@ -28,6 +28,13 @@ function indirectCallCannotGC(caller, name)
     if (/CallDestroyScriptHook/.test(caller))
         return true;
 
+    // template method called during marking and hence cannot GC
+    if (name == "op" &&
+        /^bool js::WeakMap<Key, Value, HashPolicy>::keyNeedsMark\(JSObject\*\)/.test(caller))
+    {
+        return true;
+    }
+
     return false;
 }
 
@@ -53,6 +60,7 @@ var ignoreCallees = {
     "nsISupports.Release" : true, // makes me a bit nervous; this is a bug but can happen
     "nsAXPCNativeCallContext.GetJSContext" : true,
     "js::ion::MDefinition.op" : true, // macro generated virtuals just return a constant
+    "js::ion::MDefinition.opName" : true, // macro generated virtuals just return a constant
     "js::ion::LInstruction.getDef" : true, // virtual but no implementation can GC
     "js::ion::IonCache.kind" : true, // macro generated virtuals just return a constant
 };

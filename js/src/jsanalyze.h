@@ -17,6 +17,7 @@
 #include "jscntxt.h"
 #include "jsinfer.h"
 #include "jsscript.h"
+#include "jsopcodeinlines.h"
 
 #include "ds/LifoAlloc.h"
 #include "js/TemplateLib.h"
@@ -121,13 +122,8 @@ class Bytecode
 
   private:
 
-    union {
-        /* If this is a JOF_TYPESET opcode, index into the observed types for the op. */
-        types::StackTypeSet *observedTypes;
-
-        /* If this is a JSOP_LOOPHEAD or JSOP_LOOPENTRY, information about the loop. */
-        LoopAnalysis *loop;
-    };
+    /* If this is a JSOP_LOOPHEAD or JSOP_LOOPENTRY, information about the loop. */
+    LoopAnalysis *loop;
 
     /* --------- Lifetime analysis --------- */
 
@@ -171,46 +167,6 @@ class Bytecode
     types::TypeBarrier *typeBarriers;
 };
 
-static inline unsigned
-GetDefCount(JSScript *script, unsigned offset)
-{
-    JS_ASSERT(offset < script->length);
-    jsbytecode *pc = script->code + offset;
-
-    /*
-     * Add an extra pushed value for OR/AND opcodes, so that they are included
-     * in the pushed array of stack values for type inference.
-     */
-    switch (JSOp(*pc)) {
-      case JSOP_OR:
-      case JSOP_AND:
-        return 1;
-      case JSOP_PICK:
-        /*
-         * Pick pops and pushes how deep it looks in the stack + 1
-         * items. i.e. if the stack were |a b[2] c[1] d[0]|, pick 2
-         * would pop b, c, and d to rearrange the stack to |a c[0]
-         * d[1] b[2]|.
-         */
-        return (pc[1] + 1);
-      default:
-        return StackDefs(script, pc);
-    }
-}
-
-static inline unsigned
-GetUseCount(JSScript *script, unsigned offset)
-{
-    JS_ASSERT(offset < script->length);
-    jsbytecode *pc = script->code + offset;
-
-    if (JSOp(*pc) == JSOP_PICK)
-        return (pc[1] + 1);
-    if (js_CodeSpec[*pc].nuses == -1)
-        return StackUses(script, pc);
-    return js_CodeSpec[*pc].nuses;
-}
-
 /*
  * For opcodes which assign to a local variable or argument, track an extra def
  * during SSA analysis for the value's use chain and assigned type.
@@ -230,27 +186,6 @@ ExtendedDef(jsbytecode *pc)
       case JSOP_LOCALINC:
       case JSOP_LOCALDEC:
         return true;
-      default:
-        return false;
-    }
-}
-
-/* Return whether op bytecodes do not fallthrough (they may do a jump). */
-static inline bool
-BytecodeNoFallThrough(JSOp op)
-{
-    switch (op) {
-      case JSOP_GOTO:
-      case JSOP_DEFAULT:
-      case JSOP_RETURN:
-      case JSOP_STOP:
-      case JSOP_RETRVAL:
-      case JSOP_THROW:
-      case JSOP_TABLESWITCH:
-        return true;
-      case JSOP_GOSUB:
-        /* These fall through indirectly, after executing a 'finally'. */
-        return false;
       default:
         return false;
     }
@@ -944,11 +879,6 @@ class ScriptAnalysis
     bool incrementInitialValueObserved(jsbytecode *pc) {
         const JSCodeSpec *cs = &js_CodeSpec[*pc];
         return (cs->format & JOF_POST) && !popGuaranteed(pc);
-    }
-
-    types::StackTypeSet *bytecodeTypes(const jsbytecode *pc) {
-        JS_ASSERT(js_CodeSpec[*pc].format & JOF_TYPESET);
-        return getCode(pc).observedTypes;
     }
 
     const SSAValue &poppedValue(uint32_t offset, uint32_t which) {

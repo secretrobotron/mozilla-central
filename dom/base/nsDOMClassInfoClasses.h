@@ -18,7 +18,6 @@ DOMCI_CLASS(DOMConstructor)
 // Core classes
 DOMCI_CLASS(DOMException)
 DOMCI_CLASS(Element)
-DOMCI_CLASS(Attr)
 
 // Event classes
 DOMCI_CLASS(Event)
@@ -82,8 +81,6 @@ DOMCI_CLASS(CSSRect)
 
 // DOM Chrome Window class, almost identical to Window
 DOMCI_CLASS(ChromeWindow)
-
-DOMCI_CLASS(ImageDocument)
 
 #ifdef MOZ_XUL
 DOMCI_CLASS(XULTemplateBuilder)

@@ -564,6 +564,19 @@ class AutoIdVector : public AutoVectorRooter<jsid>
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
+class AutoObjectVector : public AutoVectorRooter<JSObject *>
+{
+  public:
+    explicit AutoObjectVector(JSContext *cx
+                              MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+        : AutoVectorRooter<JSObject *>(cx, OBJVECTOR)
+    {
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    }
+
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
+
 class AutoScriptVector : public AutoVectorRooter<JSScript *>
 {
   public:
@@ -3831,6 +3844,7 @@ struct JS_PUBLIC_API(CompileOptions) {
     const char *filename;
     unsigned lineno;
     bool compileAndGo;
+    bool forEval;
     bool noScriptRval;
     bool selfHostingMode;
     bool userBit;
@@ -3849,6 +3863,7 @@ struct JS_PUBLIC_API(CompileOptions) {
         filename = f; lineno = l; return *this;
     }
     CompileOptions &setCompileAndGo(bool cng) { compileAndGo = cng; return *this; }
+    CompileOptions &setForEval(bool eval) { forEval = eval; return *this; }
     CompileOptions &setNoScriptRval(bool nsr) { noScriptRval = nsr; return *this; }
     CompileOptions &setSelfHostingMode(bool shm) { selfHostingMode = shm; return *this; }
     CompileOptions &setUserBit(bool bit) { userBit = bit; return *this; }
@@ -4985,6 +5000,9 @@ JS_DecodeInterpretedFunction(JSContext *cx, const void *data, uint32_t length,
 
 namespace JS {
 
+extern JS_PUBLIC_DATA(const HandleValue) NullHandleValue;
+extern JS_PUBLIC_DATA(const HandleValue) UndefinedHandleValue;
+
 extern JS_PUBLIC_DATA(const HandleId) JSID_VOIDHANDLE;
 extern JS_PUBLIC_DATA(const HandleId) JSID_EMPTYHANDLE;
 
@@ -5021,6 +5039,7 @@ using JS::Latin1CharsZ;
 
 using JS::AutoIdVector;
 using JS::AutoValueVector;
+using JS::AutoObjectVector;
 using JS::AutoScriptVector;
 using JS::AutoIdArray;
 

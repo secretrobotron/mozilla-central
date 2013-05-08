@@ -437,6 +437,14 @@ nsIdentifierMapEntry::RemoveNameElement(Element* aElement)
   }
 }
 
+bool
+nsIdentifierMapEntry::HasIdElementExposedAsHTMLDocumentProperty()
+{
+  Element* idElement = GetIdElement();
+  return idElement &&
+         nsGenericHTMLElement::ShouldExposeIdAsHTMLDocumentProperty(idElement);
+}
+
 // static
 size_t
 nsIdentifierMapEntry::SizeOfExcludingThis(nsIdentifierMapEntry* aEntry,
@@ -1337,7 +1345,7 @@ nsIDocument::nsIDocument()
     mCharacterSet(NS_LITERAL_CSTRING("ISO-8859-1")),
     mNodeInfoManager(nullptr),
     mCompatMode(eCompatibility_FullStandards),
-    mVisibilityState(VisibilityStateValues::Hidden),
+    mVisibilityState(dom::VisibilityState::Hidden),
     mIsInitialDocumentInWindow(false),
     mMayStartLayout(true),
     mVisible(true),
@@ -1784,6 +1792,9 @@ CustomPrototypeTrace(const nsAString& aName, JSObject* aObject, void *aArg)
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsDocument)
   CustomPrototypeTraceArgs customPrototypeArgs = { aCallback, aClosure };
   tmp->mCustomPrototypes.EnumerateRead(CustomPrototypeTrace, &customPrototypeArgs);
+  if (tmp->PreservingWrapper()) {
+    NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mExpandoAndGeneration.expando);
+  }
   nsINode::Trace(tmp, aCallback, aClosure);
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
@@ -1848,6 +1859,8 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDocument)
   // else, and not unlink an awful lot here.
 
   tmp->mIdentifierMap.Clear();
+  ++tmp->mExpandoAndGeneration.generation;
+  tmp->mExpandoAndGeneration.expando = JS::UndefinedValue();
 
   tmp->mCustomPrototypes.Clear();
 
@@ -2232,9 +2245,7 @@ nsDocument::ResetStylesheetsToURI(nsIURI* aURI)
     }
     mStyleAttrStyleSheet->Reset(aURI);
   } else {
-    mStyleAttrStyleSheet = new nsHTMLCSSStyleSheet();
-    nsresult rv = mStyleAttrStyleSheet->Init(aURI, this);
-    NS_ENSURE_SUCCESS(rv, rv);
+    mStyleAttrStyleSheet = new nsHTMLCSSStyleSheet(aURI, this);
   }
 
   // The loop over style sets below will handle putting this sheet
@@ -2725,11 +2736,19 @@ nsIDocument::GetLastModified(nsAString& aLastModified) const
 void
 nsDocument::AddToNameTable(Element *aElement, nsIAtom* aName)
 {
+  MOZ_ASSERT(nsGenericHTMLElement::ShouldExposeNameAsHTMLDocumentProperty(aElement),
+             "Only put elements that need to be exposed as document['name'] in "
+             "the named table.");
+
   nsIdentifierMapEntry *entry =
     mIdentifierMap.PutEntry(nsDependentAtomString(aName));
 
   // Null for out-of-memory
   if (entry) {
+    if (!entry->HasNameElement() &&
+        !entry->HasIdElementExposedAsHTMLDocumentProperty()) {
+      ++mExpandoAndGeneration.generation;
+    }
     entry->AddNameElement(this, aElement);
   }
 }
@@ -2747,6 +2766,10 @@ nsDocument::RemoveFromNameTable(Element *aElement, nsIAtom* aName)
     return;
 
   entry->RemoveNameElement(aElement);
+  if (!entry->HasNameElement() &&
+      !entry->HasIdElementExposedAsHTMLDocumentProperty()) {
+    ++mExpandoAndGeneration.generation;
+  }
 }
 
 void
@@ -2756,6 +2779,11 @@ nsDocument::AddToIdTable(Element *aElement, nsIAtom* aId)
     mIdentifierMap.PutEntry(nsDependentAtomString(aId));
 
   if (entry) { /* True except on OOM */
+    if (nsGenericHTMLElement::ShouldExposeIdAsHTMLDocumentProperty(aElement) &&
+        !entry->HasNameElement() &&
+        !entry->HasIdElementExposedAsHTMLDocumentProperty()) {
+      ++mExpandoAndGeneration.generation;
+    }
     entry->AddIdElement(aElement);
   }
 }
@@ -2776,6 +2804,11 @@ nsDocument::RemoveFromIdTable(Element *aElement, nsIAtom* aId)
     return;
 
   entry->RemoveIdElement(aElement);
+  if (nsGenericHTMLElement::ShouldExposeIdAsHTMLDocumentProperty(aElement) &&
+      !entry->HasNameElement() &&
+      !entry->HasIdElementExposedAsHTMLDocumentProperty()) {
+    ++mExpandoAndGeneration.generation;
+  }
   if (entry->IsEmpty()) {
     mIdentifierMap.RawRemoveEntry(entry);
   }
@@ -3337,35 +3370,30 @@ nsDocument::TryChannelCharset(nsIChannel *aChannel,
   }
 }
 
-nsresult
+already_AddRefed<nsIPresShell>
 nsDocument::CreateShell(nsPresContext* aContext, nsViewManager* aViewManager,
-                        nsStyleSet* aStyleSet,
-                        nsIPresShell** aInstancePtrResult)
+                        nsStyleSet* aStyleSet)
 {
   // Don't add anything here.  Add it to |doCreateShell| instead.
   // This exists so that subclasses can pass other values for the 4th
   // parameter some of the time.
   return doCreateShell(aContext, aViewManager, aStyleSet,
-                       eCompatibility_FullStandards, aInstancePtrResult);
+                       eCompatibility_FullStandards);
 }
 
-nsresult
+already_AddRefed<nsIPresShell>
 nsDocument::doCreateShell(nsPresContext* aContext,
                           nsViewManager* aViewManager, nsStyleSet* aStyleSet,
-                          nsCompatibility aCompatMode,
-                          nsIPresShell** aInstancePtrResult)
+                          nsCompatibility aCompatMode)
 {
-  *aInstancePtrResult = nullptr;
-
   NS_ASSERTION(!mPresShell, "We have a presshell already!");
 
-  NS_ENSURE_FALSE(GetBFCacheEntry(), NS_ERROR_FAILURE);
+  NS_ENSURE_FALSE(GetBFCacheEntry(), nullptr);
 
   FillStyleSet(aStyleSet);
 
   nsRefPtr<PresShell> shell = new PresShell;
-  nsresult rv = shell->Init(this, aContext, aViewManager, aStyleSet, aCompatMode);
-  NS_ENSURE_SUCCESS(rv, rv);
+  shell->Init(this, aContext, aViewManager, aStyleSet, aCompatMode);
 
   // Note: we don't hold a ref to the shell (it holds a ref to us)
   mPresShell = shell;
@@ -3374,9 +3402,7 @@ nsDocument::doCreateShell(nsPresContext* aContext,
 
   MaybeRescheduleAnimationFrameNotifications();
 
-  shell.forget(aInstancePtrResult);
-
-  return NS_OK;
+  return shell.forget();
 }
 
 void
@@ -5009,9 +5035,10 @@ nsDocument::Register(const nsAString& aName, const JS::Value& aOptions,
   ElementRegistrationOptions options;
   if (aOptionalArgc > 0) {
     JSAutoCompartment ac(aCx, GetWrapper());
-    NS_ENSURE_TRUE(JS_WrapValue(aCx, const_cast<JS::Value*>(&aOptions)),
+    JS::Rooted<JS::Value> opts(aCx, aOptions);
+    NS_ENSURE_TRUE(JS_WrapValue(aCx, opts.address()),
                    NS_ERROR_UNEXPECTED);
-    NS_ENSURE_TRUE(options.Init(aCx, aOptions),
+    NS_ENSURE_TRUE(options.Init(aCx, opts),
                    NS_ERROR_UNEXPECTED);
   }
 
@@ -8128,6 +8155,7 @@ nsDocument::DestroyElementMaps()
 #endif
   mStyledLinks.Clear();
   mIdentifierMap.Clear();
+  ++mExpandoAndGeneration.generation;
 }
 
 static
@@ -10933,10 +10961,10 @@ nsDocument::GetVisibilityState() const
   // Otherwise, we're visible.
   if (!IsVisible() || !mWindow || !mWindow->GetOuterWindow() ||
       mWindow->GetOuterWindow()->IsBackground()) {
-    return VisibilityStateValues::Hidden;
+    return dom::VisibilityState::Hidden;
   }
 
-  return VisibilityStateValues::Visible;
+  return dom::VisibilityState::Visible;
 }
 
 /* virtual */ void
@@ -10971,7 +10999,8 @@ nsDocument::GetMozVisibilityState(nsAString& aState)
 NS_IMETHODIMP
 nsDocument::GetVisibilityState(nsAString& aState)
 {
-  const EnumEntry& entry = VisibilityStateValues::strings[mVisibilityState];
+  const EnumEntry& entry =
+    VisibilityStateValues::strings[static_cast<int>(mVisibilityState)];
   aState.AssignASCII(entry.value, entry.length);
   return NS_OK;
 }
@@ -11201,43 +11230,53 @@ nsIDocument::Evaluate(const nsAString& aExpression, nsINode* aContextNode,
 
 // This is just a hack around the fact that window.document is not
 // [Unforgeable] yet.
-bool
-nsIDocument::PostCreateWrapper(JSContext* aCx, JS::Handle<JSObject*> aNewObject)
+JSObject*
+nsIDocument::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   MOZ_ASSERT(IsDOMBinding());
+
+  JS::Rooted<JSObject*> obj(aCx, nsINode::WrapObject(aCx, aScope));
+  if (!obj) {
+    return nullptr;
+  }
 
   nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(GetScriptGlobalObject());
   if (!win) {
     // No window, nothing else to do here
-    return true;
+    return obj;
   }
 
   if (this != win->GetExtantDoc()) {
     // We're not the current document; we're also done here
-    return true;
+    return obj;
   }
 
-  JSAutoCompartment ac(aCx, aNewObject);
+  JSAutoCompartment ac(aCx, obj);
 
   JS::Rooted<JS::Value> winVal(aCx);
   nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
-  nsresult rv = nsContentUtils::WrapNative(aCx, aNewObject, win,
+  nsresult rv = nsContentUtils::WrapNative(aCx, obj, win,
                                            &NS_GET_IID(nsIDOMWindow),
                                            winVal.address(),
                                            getter_AddRefs(holder),
                                            false);
   if (NS_FAILED(rv)) {
-    return Throw<true>(aCx, rv);
+    Throw<true>(aCx, rv);
+    return nullptr;
   }
 
   NS_NAMED_LITERAL_STRING(doc_str, "document");
 
-  return JS_DefineUCProperty(aCx, JSVAL_TO_OBJECT(winVal),
-                             reinterpret_cast<const jschar *>
-                                             (doc_str.get()),
-                             doc_str.Length(), JS::ObjectValue(*aNewObject),
-                             JS_PropertyStub, JS_StrictPropertyStub,
-                             JSPROP_READONLY | JSPROP_ENUMERATE);
+  if (!JS_DefineUCProperty(aCx, JSVAL_TO_OBJECT(winVal),
+                           reinterpret_cast<const jschar *>
+                                           (doc_str.get()),
+                           doc_str.Length(), JS::ObjectValue(*obj),
+                           JS_PropertyStub, JS_StrictPropertyStub,
+                           JSPROP_READONLY | JSPROP_ENUMERATE)) {
+    return nullptr;
+  }
+
+  return obj;
 }
 
 bool

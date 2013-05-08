@@ -363,6 +363,7 @@ bool StringToJsval(JSContext* cx, mozilla::dom::DOMString& str,
 }
 
 nsIPrincipal *GetCompartmentPrincipal(JSCompartment *compartment);
+nsIPrincipal *GetObjectPrincipal(JSObject *obj);
 
 bool IsXBLScope(JSCompartment *compartment);
 
@@ -496,8 +497,8 @@ inline bool IsDOMProxy(JSObject *obj)
 }
 
 typedef JSObject*
-(*DefineInterface)(JSContext *cx, JS::Handle<JSObject*> global, jsid id,
-                   bool *enabled);
+(*DefineInterface)(JSContext *cx, JS::Handle<JSObject*> global,
+                   JS::Handle<jsid> id, bool *enabled);
 
 typedef JSObject*
 (*ConstructNavigatorProperty)(JSContext *cx, JS::Handle<JSObject*> naviObj);

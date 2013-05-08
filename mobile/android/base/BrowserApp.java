@@ -5,6 +5,7 @@
 
 package org.mozilla.gecko;
 
+import org.mozilla.gecko.animation.PropertyAnimator;
 import org.mozilla.gecko.db.BrowserContract.Combined;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.gfx.BitmapUtils;
@@ -556,11 +557,6 @@ abstract public class BrowserApp extends GeckoApp
         mLayerView.setOnKeyListener(this);
     }
 
-    private void setSidebarMargin(int margin) {
-        ((RelativeLayout.LayoutParams) mGeckoLayout.getLayoutParams()).leftMargin = margin;
-        mGeckoLayout.requestLayout();
-    }
-
     private void setToolbarMargin(int margin) {
         ((RelativeLayout.LayoutParams) mGeckoLayout.getLayoutParams()).topMargin = margin;
         mGeckoLayout.requestLayout();
@@ -702,43 +698,17 @@ abstract public class BrowserApp extends GeckoApp
             mMainLayoutAnimator.stop();
 
         boolean isSideBar = (HardwareUtils.isTablet() && mOrientation == Configuration.ORIENTATION_LANDSCAPE);
+        final int sidebarWidth = getResources().getDimensionPixelSize(R.dimen.tabs_sidebar_width);
 
-        ViewGroup.LayoutParams lp = mTabsPanel.getLayoutParams();
-        if (isSideBar) {
-            lp.width = getResources().getDimensionPixelSize(R.dimen.tabs_sidebar_width);
-        } else {
-            lp.width = ViewGroup.LayoutParams.FILL_PARENT;
-        }
+        ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) mTabsPanel.getLayoutParams();
+        lp.width = (isSideBar ? sidebarWidth : ViewGroup.LayoutParams.FILL_PARENT);
         mTabsPanel.requestLayout();
 
-        final boolean changed = (mTabsPanel.isSideBar() != isSideBar);
-        final boolean needsRelayout = (changed && mTabsPanel.isShown());
+        final boolean sidebarIsShown = (isSideBar && mTabsPanel.isShown());
+        final int mainLayoutScrollX = (sidebarIsShown ? -sidebarWidth : 0);
+        mMainLayout.scrollTo(mainLayoutScrollX, 0);
 
-        if (needsRelayout) {
-            final int width;
-            final int scrollY;
-
-            if (isSideBar) {
-                width = lp.width;
-                mMainLayout.scrollTo(0, 0);
-            } else {
-                width = 0;
-            }
-
-            mBrowserToolbar.adjustForTabsLayout(width);
-            setSidebarMargin(width);
-        }
-
-        if (changed) {
-            // Cancel state of previous sidebar state
-            mBrowserToolbar.updateTabs(false);
-
-            mTabsPanel.setIsSideBar(isSideBar);
-            mBrowserToolbar.setIsSideBar(isSideBar);
-
-            // Update with new sidebar state
-            mBrowserToolbar.updateTabs(mTabsPanel.isShown());
-        }
+        mTabsPanel.setIsSideBar(isSideBar);
     }
 
     @Override
@@ -919,7 +889,7 @@ abstract public class BrowserApp extends GeckoApp
 
     @Override
     public boolean autoHideTabs() {
-        if (!hasTabsSideBar() && areTabsShown()) {
+        if (areTabsShown()) {
             hideTabs();
             return true;
         }
@@ -940,34 +910,25 @@ abstract public class BrowserApp extends GeckoApp
             mMainLayoutAnimator.stop(false);
         }
 
-        if (mTabsPanel.isShown())
+        if (areTabsShown()) {
             mTabsPanel.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        }
 
         mMainLayoutAnimator = new PropertyAnimator(animationLength, sTabsInterpolator);
         mMainLayoutAnimator.setPropertyAnimationListener(this);
 
-        boolean usingTextureView = mLayerView.shouldUseTextureView();
-        mMainLayoutAnimator.setUseHardwareLayer(usingTextureView);
-
         if (hasTabsSideBar()) {
-            mBrowserToolbar.prepareTabsAnimation(mMainLayoutAnimator, width);
-
-            // Set the gecko layout for sliding.
-            if (!mTabsPanel.isShown()) {
-                mGeckoLayout.scrollTo(mTabsPanel.getWidth() * -1, 0);
-                setSidebarMargin(0);
-            }
-
-            mMainLayoutAnimator.attach(mGeckoLayout,
+            mMainLayoutAnimator.attach(mMainLayout,
                                        PropertyAnimator.Property.SCROLL_X,
                                        -width);
         } else {
-            mTabsPanel.prepareTabsAnimation(mMainLayoutAnimator);
-
             mMainLayoutAnimator.attach(mMainLayout,
                                        PropertyAnimator.Property.SCROLL_Y,
                                        -height);
         }
+
+        mTabsPanel.prepareTabsAnimation(mMainLayoutAnimator);
+        mBrowserToolbar.prepareTabsAnimation(areTabsShown());
 
         // If the tabs layout is animating onto the screen, pin the dynamic
         // toolbar.
@@ -985,30 +946,17 @@ abstract public class BrowserApp extends GeckoApp
 
     @Override
     public void onPropertyAnimationStart() {
-        mBrowserToolbar.updateTabs(true);
     }
 
     @Override
     public void onPropertyAnimationEnd() {
-        if (mTabsPanel.isShown()) {
-            if (hasTabsSideBar()) {
-                setSidebarMargin(mTabsPanel.getWidth());
-                mGeckoLayout.scrollTo(0, 0);
-            }
-
-            mGeckoLayout.requestLayout();
-        } else {
+        if (!areTabsShown()) {
             mTabsPanel.setVisibility(View.INVISIBLE);
-            mBrowserToolbar.updateTabs(false);
-            mBrowserToolbar.finishTabsAnimation();
             mTabsPanel.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         }
 
-        mBrowserToolbar.refreshBackground();
         mTabsPanel.finishTabsAnimation();
-
-        if (hasTabsSideBar())
-            mBrowserToolbar.adjustTabsAnimation(true);
+        mBrowserToolbar.finishTabsAnimation(areTabsShown());
 
         mMainLayoutAnimator = null;
     }

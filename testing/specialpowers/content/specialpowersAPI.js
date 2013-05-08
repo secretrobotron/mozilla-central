@@ -962,20 +962,15 @@ SpecialPowersAPI.prototype = {
     return this._getTopChromeWindow(window).document
                                            .getElementById("PopupAutoComplete");
   },
-  addAutoCompletePopupEventListener: function(window, eventname, listener) {
-    this._getAutoCompletePopup(window).addEventListener(eventname,
+  addAutoCompletePopupEventListener: function(window, listener) {
+    this._getAutoCompletePopup(window).addEventListener("popupshowing",
                                                         listener,
                                                         false);
   },
-  removeAutoCompletePopupEventListener: function(window, eventname, listener) {
-    this._getAutoCompletePopup(window).removeEventListener(eventname,
+  removeAutoCompletePopupEventListener: function(window, listener) {
+    this._getAutoCompletePopup(window).removeEventListener("popupshowing",
                                                            listener,
                                                            false);
-  },
-  get formHistory() {
-    let tmp = {};
-    Cu.import("resource://gre/modules/FormHistory.jsm", tmp);
-    return wrapPrivileged(tmp.FormHistory);
   },
   getFormFillController: function(window) {
     return Components.classes["@mozilla.org/satchel/form-fill-controller;1"]
@@ -1261,8 +1256,12 @@ SpecialPowersAPI.prototype = {
     return this.focusManager.focusedWindow;
   },
 
-  focus: function(window) {
-    window.focus();
+  focus: function(aWindow) {
+    // This is called inside TestRunner._makeIframe without aWindow, because of assertions in oop mochitests
+    // With aWindow, it is called in SimpleTest.waitForFocus to allow popup window opener focus switching
+    if (aWindow)
+      aWindow.focus();
+    sendAsyncMessage("SpecialPowers.Focus", {});
   },
 
   getClipboardData: function(flavor) {

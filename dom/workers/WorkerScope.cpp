@@ -355,7 +355,7 @@ private:
 
     JSFunction* adaptor =
       js::NewFunctionWithReserved(aCx, UnwrapErrorEvent, 1, 0,
-                                  JS_GetGlobalObject(aCx), "unwrap");
+                                  JS_GetGlobalForScopeChain(aCx), "unwrap");
     if (!adaptor) {
       return false;
     }
@@ -860,10 +860,10 @@ private:
       return false;
     }
 
-    jsval message;
-    jsval transferable = JSVAL_VOID;
+    JS::Rooted<JS::Value> message(aCx);
+    JS::Rooted<JS::Value> transferable(aCx, JSVAL_VOID);
     if (!JS_ConvertArguments(aCx, aArgc, JS_ARGV(aCx, aVp), "v/v",
-                             &message, &transferable)) {
+                             message.address(), transferable.address())) {
       return false;
     }
 

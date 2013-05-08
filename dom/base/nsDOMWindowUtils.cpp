@@ -71,6 +71,7 @@
 #include "nsPrintfCString.h"
 #include "nsViewportInfo.h"
 #include "nsIFormControl.h"
+#include "nsIScriptError.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -2514,6 +2515,13 @@ nsDOMWindowUtils::GetOuterWindowWithId(uint64_t aWindowID,
     return NS_ERROR_DOM_SECURITY_ERR;
   }
 
+  // XXX This method is deprecated.  See bug 865664.
+  nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
+                                  "DOM",
+                                  nsContentUtils::GetDocumentFromCaller(),
+                                  nsContentUtils::eDOM_PROPERTIES,
+                                  "GetWindowWithOuterIdWarning");
+
   *aWindow = nsGlobalWindow::GetOuterWindowWithId(aWindowID);
   NS_IF_ADDREF(*aWindow);
   return NS_OK;
@@ -2942,8 +2950,8 @@ nsDOMWindowUtils::GetPlugins(JSContext* cx, JS::Value* aPlugins)
   nsTArray<nsIObjectLoadingContent*> plugins;
   doc->GetPlugins(plugins);
 
-  JSObject* jsPlugins = nullptr;
-  nsresult rv = nsTArrayToJSArray(cx, plugins, &jsPlugins);
+  JS::Rooted<JSObject*> jsPlugins(cx);
+  nsresult rv = nsTArrayToJSArray(cx, plugins, jsPlugins.address());
   NS_ENSURE_SUCCESS(rv, rv);
 
   *aPlugins = OBJECT_TO_JSVAL(jsPlugins);

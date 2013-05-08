@@ -21,6 +21,11 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(AudioBufferSourceNode)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mBuffer)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mPlaybackRate)
   if (tmp->Context()) {
+    // AudioNode's Unlink implementation disconnects us from the graph
+    // too, but we need to do this right here to make sure that
+    // UnregisterAudioBufferSourceNode can properly untangle us from
+    // the possibly connected PannerNodes.
+    tmp->DisconnectFromGraph();
     tmp->Context()->UnregisterAudioBufferSourceNode(tmp);
   }
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END_INHERITED(AudioNode)
@@ -292,9 +297,16 @@ public:
     return mStart + mPosition;
   }
 
-  int32_t ComputeFinalOutSampleRate() const
+  uint32_t ComputeFinalOutSampleRate()
   {
-    return static_cast<uint32_t>(IdealAudioRate() / (mPlaybackRate * mDopplerShift));
+    if (mPlaybackRate <= 0 || mPlaybackRate != mPlaybackRate) {
+      mPlaybackRate = 1.0f;
+    }
+    if (mDopplerShift <= 0 || mDopplerShift != mDopplerShift) {
+      mDopplerShift = 1.0f;
+    }
+    return WebAudioUtils::TruncateFloatToInt<uint32_t>(IdealAudioRate() /
+                                                       (mPlaybackRate * mDopplerShift));
   }
 
   bool ShouldResample() const
@@ -309,7 +321,7 @@ public:
     if (mPlaybackRateTimeline.HasSimpleValue()) {
       mPlaybackRate = mPlaybackRateTimeline.GetValue();
     } else {
-      mPlaybackRate = mPlaybackRateTimeline.GetValueAtTime<TrackTicks>(aStream->GetCurrentPosition());
+      mPlaybackRate = mPlaybackRateTimeline.GetValueAtTime(aStream->GetCurrentPosition());
     }
 
     // Make sure the playback rate and the doppler shift are something
@@ -414,9 +426,9 @@ AudioBufferSourceNode::AudioBufferSourceNode(AudioContext* aContext)
   , mOffset(0.0)
   , mDuration(std::numeric_limits<double>::min())
   , mPlaybackRate(new AudioParam(this, SendPlaybackRateToStream, 1.0f))
-  , mPannerNode(nullptr)
   , mLoop(false)
   , mStartCalled(false)
+  , mStopped(false)
   , mOffsetAndDurationRemembered(false)
 {
   mStream = aContext->Graph()->CreateAudioNodeStream(
@@ -550,6 +562,31 @@ void
 AudioBufferSourceNode::NotifyMainThreadStateChanged()
 {
   if (mStream->IsFinished()) {
+    class EndedEventDispatcher : public nsRunnable
+    {
+    public:
+      explicit EndedEventDispatcher(AudioBufferSourceNode* aNode)
+        : mNode(aNode) {}
+      NS_IMETHODIMP Run()
+      {
+        // If it's not safe to run scripts right now, schedule this to run later
+        if (!nsContentUtils::IsSafeToRunScript()) {
+          nsContentUtils::AddScriptRunner(this);
+          return NS_OK;
+        }
+
+        mNode->DispatchTrustedEvent(NS_LITERAL_STRING("ended"));
+        return NS_OK;
+      }
+    private:
+      nsRefPtr<AudioBufferSourceNode> mNode;
+    };
+    if (!mStopped) {
+      // Only dispatch the ended event once
+      NS_DispatchToMainThread(new EndedEventDispatcher(this));
+      mStopped = true;
+    }
+
     // Drop the playing reference
     // Warning: The below line might delete this.
     mPlayingRef.Drop(this);

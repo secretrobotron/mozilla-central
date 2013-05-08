@@ -23,6 +23,7 @@
 #include "AudioNodeStream.h"
 #include "AudioNodeExternalInputStream.h"
 #include <algorithm>
+#include "DOMMediaStream.h"
 
 using namespace mozilla::layers;
 using namespace mozilla::dom;
@@ -676,6 +677,8 @@ void
 MediaStreamGraphImpl::CreateOrDestroyAudioStreams(GraphTime aAudioOutputStartTime,
                                                   MediaStream* aStream)
 {
+  MOZ_ASSERT(mRealtime, "Should only attempt to create audio streams in real-time mode");
+
   nsAutoTArray<bool,2> audioOutputStreamsFound;
   for (uint32_t i = 0; i < aStream->mAudioOutputStreams.Length(); ++i) {
     audioOutputStreamsFound.AppendElement(false);
@@ -732,6 +735,8 @@ void
 MediaStreamGraphImpl::PlayAudio(MediaStream* aStream,
                                 GraphTime aFrom, GraphTime aTo)
 {
+  MOZ_ASSERT(mRealtime, "Should only attempt to play audio in realtime mode");
+
   if (aStream->mAudioOutputStreams.IsEmpty()) {
     return;
   }
@@ -805,6 +810,8 @@ MediaStreamGraphImpl::PlayAudio(MediaStream* aStream,
 void
 MediaStreamGraphImpl::PlayVideo(MediaStream* aStream)
 {
+  MOZ_ASSERT(mRealtime, "Should only attempt to play video in realtime mode");
+
   if (aStream->mVideoOutputs.IsEmpty())
     return;
 
@@ -1010,10 +1017,13 @@ MediaStreamGraphImpl::RunThread()
         }
       }
       NotifyHasCurrentData(stream);
-      CreateOrDestroyAudioStreams(prevComputedTime, stream);
-      PlayAudio(stream, prevComputedTime, mStateComputedTime);
-      audioStreamsActive += stream->mAudioOutputStreams.Length();
-      PlayVideo(stream);
+      if (mRealtime) {
+        // Only playback audio and video in real-time mode
+        CreateOrDestroyAudioStreams(prevComputedTime, stream);
+        PlayAudio(stream, prevComputedTime, mStateComputedTime);
+        audioStreamsActive += stream->mAudioOutputStreams.Length();
+        PlayVideo(stream);
+      }
       SourceMediaStream* is = stream->AsSourceStream();
       if (is) {
         UpdateBufferSufficiencyState(is);
@@ -1030,8 +1040,6 @@ MediaStreamGraphImpl::RunThread()
     // Send updates to the main thread and wait for the next control loop
     // iteration.
     {
-      // Not using MonitorAutoLock since we need to unlock in a way
-      // that doesn't match lexical scopes.
       MonitorAutoLock lock(mMonitor);
       PrepareUpdatesToMainThreadState();
       if (mForceShutDown || (IsEmpty() && mMessageQueue.IsEmpty())) {
@@ -1045,26 +1053,30 @@ MediaStreamGraphImpl::RunThread()
         return;
       }
 
-      PRIntervalTime timeout = PR_INTERVAL_NO_TIMEOUT;
-      TimeStamp now = TimeStamp::Now();
-      if (mNeedAnotherIteration) {
-        int64_t timeoutMS = MEDIA_GRAPH_TARGET_PERIOD_MS -
-          int64_t((now - mCurrentTimeStamp).ToMilliseconds());
-        // Make sure timeoutMS doesn't overflow 32 bits by waking up at
-        // least once a minute, if we need to wake up at all
-        timeoutMS = std::max<int64_t>(0, std::min<int64_t>(timeoutMS, 60*1000));
-        timeout = PR_MillisecondsToInterval(uint32_t(timeoutMS));
-        LOG(PR_LOG_DEBUG, ("Waiting for next iteration; at %f, timeout=%f",
-                           (now - mInitialTimeStamp).ToSeconds(), timeoutMS/1000.0));
-        mWaitState = WAITSTATE_WAITING_FOR_NEXT_ITERATION;
-      } else {
-        mWaitState = WAITSTATE_WAITING_INDEFINITELY;
-      }
-      if (timeout > 0) {
-        mMonitor.Wait(timeout);
-        LOG(PR_LOG_DEBUG, ("Resuming after timeout; at %f, elapsed=%f",
-                           (TimeStamp::Now() - mInitialTimeStamp).ToSeconds(),
-                           (TimeStamp::Now() - now).ToSeconds()));
+      // No need to wait in non-realtime mode, just churn through the input as soon
+      // as possible.
+      if (mRealtime) {
+        PRIntervalTime timeout = PR_INTERVAL_NO_TIMEOUT;
+        TimeStamp now = TimeStamp::Now();
+        if (mNeedAnotherIteration) {
+          int64_t timeoutMS = MEDIA_GRAPH_TARGET_PERIOD_MS -
+            int64_t((now - mCurrentTimeStamp).ToMilliseconds());
+          // Make sure timeoutMS doesn't overflow 32 bits by waking up at
+          // least once a minute, if we need to wake up at all
+          timeoutMS = std::max<int64_t>(0, std::min<int64_t>(timeoutMS, 60*1000));
+          timeout = PR_MillisecondsToInterval(uint32_t(timeoutMS));
+          LOG(PR_LOG_DEBUG, ("Waiting for next iteration; at %f, timeout=%f",
+                             (now - mInitialTimeStamp).ToSeconds(), timeoutMS/1000.0));
+          mWaitState = WAITSTATE_WAITING_FOR_NEXT_ITERATION;
+        } else {
+          mWaitState = WAITSTATE_WAITING_INDEFINITELY;
+        }
+        if (timeout > 0) {
+          mMonitor.Wait(timeout);
+          LOG(PR_LOG_DEBUG, ("Resuming after timeout; at %f, elapsed=%f",
+                             (TimeStamp::Now() - mInitialTimeStamp).ToSeconds(),
+                             (TimeStamp::Now() - now).ToSeconds()));
+        }
       }
       mWaitState = WAITSTATE_RUNNING;
       mNeedAnotherIteration = false;
@@ -1138,6 +1150,9 @@ public:
   {
     NS_ASSERTION(mGraph->mDetectedNotRunning,
                  "We should know the graph thread control loop isn't running!");
+
+    mGraph->ShutdownThreads();
+
     // mGraph's thread is not running so it's OK to do whatever here
     if (mGraph->IsEmpty()) {
       // mGraph is no longer needed, so delete it. If the graph is not empty
@@ -1145,6 +1160,13 @@ public:
       // detect that the manager has been emptied, and delete it.
       delete mGraph;
     } else {
+      for (uint32_t i = 0; i < mGraph->mStreams.Length(); ++i) {
+        DOMMediaStream* s = mGraph->mStreams[i]->GetWrapper();
+        if (s) {
+          s->NotifyMediaStreamGraphShutdown();
+        }
+      }
+
       NS_ASSERTION(mGraph->mForceShutDown, "Not in forced shutdown?");
       mGraph->mLifecycleState =
         MediaStreamGraphImpl::LIFECYCLE_WAITING_FOR_STREAM_DESTRUCTION;
@@ -1858,7 +1880,8 @@ MediaInputPort::SetGraphImpl(MediaStreamGraphImpl* aGraph)
 }
 
 already_AddRefed<MediaInputPort>
-ProcessedMediaStream::AllocateInputPort(MediaStream* aStream, uint32_t aFlags)
+ProcessedMediaStream::AllocateInputPort(MediaStream* aStream, uint32_t aFlags,
+                                        uint16_t aInputNumber, uint16_t aOutputNumber)
 {
   // This method creates two references to the MediaInputPort: one for
   // the main thread, and one for the MediaStreamGraph.
@@ -1875,7 +1898,8 @@ ProcessedMediaStream::AllocateInputPort(MediaStream* aStream, uint32_t aFlags)
     }
     nsRefPtr<MediaInputPort> mPort;
   };
-  nsRefPtr<MediaInputPort> port = new MediaInputPort(aStream, this, aFlags);
+  nsRefPtr<MediaInputPort> port = new MediaInputPort(aStream, this, aFlags,
+                                                     aInputNumber, aOutputNumber);
   port->SetGraphImpl(GraphImpl());
   GraphImpl()->AppendMessage(new Message(port));
   return port.forget();
@@ -1927,7 +1951,7 @@ ProcessedMediaStream::DestroyImpl()
  */
 static const int32_t INITIAL_CURRENT_TIME = 1;
 
-MediaStreamGraphImpl::MediaStreamGraphImpl()
+MediaStreamGraphImpl::MediaStreamGraphImpl(bool aRealtime)
   : mCurrentTime(INITIAL_CURRENT_TIME)
   , mStateComputedTime(INITIAL_CURRENT_TIME)
   , mProcessingGraphUpdateIndex(0)
@@ -1940,6 +1964,7 @@ MediaStreamGraphImpl::MediaStreamGraphImpl()
   , mPostedRunInStableStateEvent(false)
   , mDetectedNotRunning(false)
   , mPostedRunInStableState(false)
+  , mRealtime(aRealtime)
 {
 #ifdef PR_LOGGING
   if (!gMediaStreamGraphLog) {
@@ -1980,11 +2005,31 @@ MediaStreamGraph::GetInstance()
       nsContentUtils::RegisterShutdownObserver(new MediaStreamGraphShutdownObserver());
     }
 
-    gGraph = new MediaStreamGraphImpl();
+    gGraph = new MediaStreamGraphImpl(true);
     LOG(PR_LOG_DEBUG, ("Starting up MediaStreamGraph %p", gGraph));
   }
 
   return gGraph;
+}
+
+MediaStreamGraph*
+MediaStreamGraph::CreateNonRealtimeInstance()
+{
+  NS_ASSERTION(NS_IsMainThread(), "Main thread only");
+
+  MediaStreamGraphImpl* graph = new MediaStreamGraphImpl(false);
+  return graph;
+}
+
+void
+MediaStreamGraph::DestroyNonRealtimeInstance(MediaStreamGraph* aGraph)
+{
+  NS_ASSERTION(NS_IsMainThread(), "Main thread only");
+  MOZ_ASSERT(aGraph != gGraph, "Should not destroy the global graph here");
+
+  MediaStreamGraphImpl* graph = static_cast<MediaStreamGraphImpl*>(aGraph);
+  graph->ForceShutDown();
+  delete graph;
 }
 
 SourceMediaStream*
@@ -2031,9 +2076,11 @@ MediaStreamGraph::CreateAudioNodeStream(AudioNodeEngine* aEngine,
   NS_ADDREF(stream);
   MediaStreamGraphImpl* graph = static_cast<MediaStreamGraphImpl*>(this);
   stream->SetGraphImpl(graph);
-  stream->SetChannelMixingParametersImpl(aEngine->NodeMainThread()->ChannelCount(),
-                                         aEngine->NodeMainThread()->ChannelCountModeValue(),
-                                         aEngine->NodeMainThread()->ChannelInterpretationValue());
+  if (aEngine->HasNode()) {
+    stream->SetChannelMixingParametersImpl(aEngine->NodeMainThread()->ChannelCount(),
+                                           aEngine->NodeMainThread()->ChannelCountModeValue(),
+                                           aEngine->NodeMainThread()->ChannelInterpretationValue());
+  }
   graph->AppendMessage(new CreateMessage(stream));
   return stream;
 }

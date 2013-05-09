@@ -23,7 +23,7 @@ typedef struct SpeexResamplerState_ SpeexResamplerState;
 
 namespace mozilla {
 
-class AudioNodeExternalInputStream : public AudioNodeStream {
+class AudioNodeExternalInputStream : public ProcessedMediaStream {
 public:
 
   AudioNodeExternalInputStream(AudioNodeEngine* aEngine,
@@ -33,12 +33,23 @@ public:
 
   virtual void ProduceOutput(GraphTime aFrom, GraphTime aTo);
 
+  // Any thread
+  AudioNodeEngine* Engine() { return mEngine; }
+
 private:
   struct TrackMapEntry {
     SpeexResamplerState* mResampler;
     TrackTicks mLastTick;
     TrackID mTrackID;
   };
+
+  AudioChunk mLastChunk;
+  nsTArray<AudioChunk> mChunkQueue;
+
+  // The engine that will generate output for this node.
+  nsAutoPtr<AudioNodeEngine> mEngine;
+
+  void FinalizeProducedOutput();
 
   nsTArray<TrackMapEntry> mTrackMap;
 

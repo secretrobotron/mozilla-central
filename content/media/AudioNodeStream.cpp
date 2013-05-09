@@ -366,9 +366,7 @@ AudioNodeStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
     FinishOutput();
   }
 
-  StreamBuffer::Track* track = EnsureTrack();
-
-  AudioSegment* segment = track->Get<AudioSegment>();
+  EnsureTrack();
 
   mLastChunks.SetLength(1);
   mLastChunks[0].SetNull(0);
@@ -395,6 +393,15 @@ AudioNodeStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
     }
   }
 
+  FinalizeProducedOutput();
+}
+
+void
+AudioNodeStream::FinalizeProducedOutput()
+{
+  StreamBuffer::Track* track = EnsureTrack();
+  AudioSegment* segment = track->Get<AudioSegment>();
+
   if (mKind == MediaStreamGraph::EXTERNAL_STREAM) {
     segment->AppendAndConsumeChunk(&mLastChunks[0]);
   } else {
@@ -404,29 +411,6 @@ AudioNodeStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
   for (uint32_t j = 0; j < mListeners.Length(); ++j) {
     MediaStreamListener* l = mListeners[j];
     AudioChunk copyChunk = mLastChunks[0];
-    AudioSegment tmpSegment;
-    tmpSegment.AppendAndConsumeChunk(&copyChunk);
-    l->NotifyQueuedTrackChanges(Graph(), AUDIO_NODE_STREAM_TRACK_ID,
-                                IdealAudioRate(), segment->GetDuration(), 0,
-                                tmpSegment);
-  }
-}
-
-void
-AudioNodeStream::FinalizeProducedOutput(AudioChunk* outputChunk)
-{
-  StreamBuffer::Track* track = EnsureTrack();
-  AudioSegment* segment = track->Get<AudioSegment>();
-
-  if (mKind == MediaStreamGraph::EXTERNAL_STREAM) {
-    segment->AppendAndConsumeChunk(outputChunk);
-  } else {
-    segment->AppendNullData(outputChunk->GetDuration());
-  }
-
-  for (uint32_t j = 0; j < mListeners.Length(); ++j) {
-    MediaStreamListener* l = mListeners[j];
-    AudioChunk copyChunk = *outputChunk;
     AudioSegment tmpSegment;
     tmpSegment.AppendAndConsumeChunk(&copyChunk);
     l->NotifyQueuedTrackChanges(Graph(), AUDIO_NODE_STREAM_TRACK_ID,
@@ -463,4 +447,3 @@ AudioNodeStream::FinishOutput()
 }
 
 }
->>>>>>> d88e83b2bf280b25bd6be2ce10ac530d1e51ae68

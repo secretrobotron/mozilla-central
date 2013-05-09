@@ -23,11 +23,6 @@ public:
 
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope);
 
-  virtual uint32_t NumberOfInputs() const MOZ_FINAL MOZ_OVERRIDE
-  {
-    return 1;
-  }
-
 private:
   nsRefPtr<MediaInputPort> mInputPort;
 };

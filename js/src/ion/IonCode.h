@@ -149,10 +149,10 @@ struct IonScript
 {
   private:
     // Code pointer containing the actual method.
-    HeapPtr<IonCode> method_;
+    EncapsulatedPtr<IonCode> method_;
 
     // Deoptimization table used by this method.
-    HeapPtr<IonCode> deoptTable_;
+    EncapsulatedPtr<IonCode> deoptTable_;
 
     // Entrypoint for OSR, or NULL.
     jsbytecode *osrPc_;
@@ -176,9 +176,13 @@ struct IonScript
     // Number of times this script bailed out without invalidation.
     uint32_t numBailouts_;
 
-    // Flag set when we bailed out in parallel execution and should ensure its
-    // call targets are compiled.
-    bool hasInvalidatedCallTarget_;
+    // Flag set when it is likely that one of our (transitive) call
+    // targets is not compiled.  Used in ForkJoin.cpp to decide when
+    // we should add call targets to the worklist.
+    bool hasUncompiledCallTarget_;
+
+    // Flag set if IonScript was compiled with SPS profiling enabled.
+    bool hasSPSInstrumentation_;
 
     // Any kind of data needed by the runtime, these can be either cache
     // information or profiling info.
@@ -255,8 +259,8 @@ struct IonScript
     SnapshotOffset *bailoutTable() {
         return (SnapshotOffset *) &bottomBuffer()[bailoutTable_];
     }
-    HeapValue *constants() {
-        return (HeapValue *) &bottomBuffer()[constantTable_];
+    EncapsulatedValue *constants() {
+        return (EncapsulatedValue *) &bottomBuffer()[constantTable_];
     }
     const SafepointIndex *safepointIndices() const {
         return const_cast<IonScript *>(this)->safepointIndices();
@@ -373,14 +377,23 @@ struct IonScript
     bool bailoutExpected() const {
         return numBailouts_ > 0;
     }
-    void setHasInvalidatedCallTarget() {
-        hasInvalidatedCallTarget_ = true;
+    void setHasUncompiledCallTarget() {
+        hasUncompiledCallTarget_ = true;
     }
-    void clearHasInvalidatedCallTarget() {
-        hasInvalidatedCallTarget_ = false;
+    void clearHasUncompiledCallTarget() {
+        hasUncompiledCallTarget_ = false;
     }
-    bool hasInvalidatedCallTarget() const {
-        return hasInvalidatedCallTarget_;
+    bool hasUncompiledCallTarget() const {
+        return hasUncompiledCallTarget_;
+    }
+    void setHasSPSInstrumentation() {
+        hasSPSInstrumentation_ = true;
+    }
+    void clearHasSPSInstrumentation() {
+        hasSPSInstrumentation_ = false;
+    }
+    bool hasSPSInstrumentation() const {
+        return hasSPSInstrumentation_;
     }
     const uint8_t *snapshots() const {
         return reinterpret_cast<const uint8_t *>(this) + snapshots_;
@@ -407,7 +420,7 @@ struct IonScript
     size_t sizeOfIncludingThis(JSMallocSizeOfFun mallocSizeOf) const {
         return mallocSizeOf(this);
     }
-    HeapValue &getConstant(size_t index) {
+    EncapsulatedValue &getConstant(size_t index) {
         JS_ASSERT(index < numConstants());
         return constants()[index];
     }
@@ -448,7 +461,7 @@ struct IonScript
     void destroyCaches();
     void copySnapshots(const SnapshotWriter *writer);
     void copyBailoutTable(const SnapshotOffset *table);
-    void copyConstants(const HeapValue *vp);
+    void copyConstants(const Value *vp);
     void copySafepointIndices(const SafepointIndex *firstSafepointIndex, MacroAssembler &masm);
     void copyOsiIndices(const OsiIndex *firstOsiIndex, MacroAssembler &masm);
     void copyRuntimeData(const uint8_t *data);

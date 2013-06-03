@@ -252,6 +252,12 @@ JSObject::getParent() const
 }
 
 inline JSObject *
+JSObject::getMetadata() const
+{
+    return lastProperty()->getObjectMetadata();
+}
+
+inline JSObject *
 JSObject::enclosingScope()
 {
     return isScope()
@@ -308,6 +314,7 @@ JSObject::canRemoveLastProperty()
     JS_ASSERT(!inDictionaryMode());
     js::Shape *previous = lastProperty()->previous().get();
     return previous->getObjectParent() == lastProperty()->getObjectParent()
+        && previous->getObjectMetadata() == lastProperty()->getObjectMetadata()
         && previous->getObjectFlags() == lastProperty()->getObjectFlags();
 }
 
@@ -906,6 +913,7 @@ inline bool JSObject::isPrimitive() const { return isNumber() || isString() || i
 inline bool JSObject::isRegExp() const { return hasClass(&js::RegExpClass); }
 inline bool JSObject::isRegExpStatics() const { return hasClass(&js::RegExpStaticsClass); }
 inline bool JSObject::isScope() const { return isCall() || isDeclEnv() || isNestedScope(); }
+inline bool JSObject::isScriptSource() const { return hasClass(&js::ScriptSourceClass); }
 inline bool JSObject::isSetIterator() const { return hasClass(&js::SetIteratorClass); }
 inline bool JSObject::isStaticBlock() const { return isBlock() && !getProto(); }
 inline bool JSObject::isStopIteration() const { return hasClass(&js::StopIterationClass); }
@@ -1683,8 +1691,11 @@ CopyInitializerObject(JSContext *cx, HandleObject baseobj, NewObjectKind newKind
     if (!obj)
         return NULL;
 
+    RootedObject metadata(cx, obj->getMetadata());
     RootedShape lastProp(cx, baseobj->lastProperty());
     if (!JSObject::setLastProperty(cx, obj, lastProp))
+        return NULL;
+    if (metadata && !JSObject::setMetadata(cx, obj, metadata))
         return NULL;
 
     return obj;
@@ -1791,6 +1802,18 @@ DefineConstructorAndPrototype(JSContext *cx, HandleObject obj, JSProtoKey key, H
                               const JSPropertySpec *static_ps, const JSFunctionSpec *static_fs,
                               JSObject **ctorp = NULL,
                               gc::AllocKind ctorKind = JSFunction::FinalizeKind);
+
+static JS_ALWAYS_INLINE JSObject *
+NewObjectMetadata(JSContext *cx)
+{
+    // The metadata callback is invoked before each created object, except when
+    // analysis is active as the callback may reenter JS.
+    if (JS_UNLIKELY((size_t)cx->compartment->objectMetadataCallback) && !cx->compartment->activeAnalysis) {
+        gc::AutoSuppressGC suppress(cx);
+        return cx->compartment->objectMetadataCallback(cx);
+    }
+    return NULL;
+}
 
 } /* namespace js */
 

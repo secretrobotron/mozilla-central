@@ -109,7 +109,6 @@ ClientLayerManager::BeginTransactionWithTarget(gfxContext* aTarget)
   // don't signal a new transaction to ShadowLayerForwarder. Carry on adding
   // to the previous transaction.
   ScreenOrientation orientation;
-  nsIntRect clientBounds;
   if (TabChild* window = mWidget->GetOwningTabChild()) {
     orientation = window->GetOrientation();
   } else {
@@ -117,7 +116,9 @@ ClientLayerManager::BeginTransactionWithTarget(gfxContext* aTarget)
     hal::GetCurrentScreenConfiguration(&currentConfig);
     orientation = currentConfig.orientation();
   }
+  nsIntRect clientBounds;
   mWidget->GetClientBounds(clientBounds);
+  clientBounds.x = clientBounds.y = 0;
   ShadowLayerForwarder::BeginTransaction(mTargetBounds, mTargetRotation, clientBounds, orientation);
 
   // If we're drawing on behalf of a context with async pan/zoom
@@ -374,6 +375,7 @@ ClientLayerManager::GetBackendName(nsAString& aName)
     case LAYERS_OPENGL: aName.AssignLiteral("OpenGL"); return;
     case LAYERS_D3D9: aName.AssignLiteral("Direct3D 9"); return;
     case LAYERS_D3D10: aName.AssignLiteral("Direct3D 10"); return;
+    case LAYERS_D3D11: aName.AssignLiteral("Direct3D 11"); return;
     default: NS_RUNTIMEABORT("Invalid backend");
   }
 }

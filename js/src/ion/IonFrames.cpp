@@ -88,21 +88,17 @@ IonFrameIterator::calleeToken() const
 JSFunction *
 IonFrameIterator::callee() const
 {
-    if (isScripted()) {
-        JS_ASSERT(isFunctionFrame() || isParallelFunctionFrame());
-        if (isFunctionFrame())
-            return CalleeTokenToFunction(calleeToken());
-        return CalleeTokenToParallelFunction(calleeToken());
-    }
-
-    JS_ASSERT(isNative());
-    return exitFrame()->nativeExit()->vp()[0].toObject().toFunction();
+    JS_ASSERT(isScripted());
+    JS_ASSERT(isFunctionFrame() || isParallelFunctionFrame());
+    if (isFunctionFrame())
+        return CalleeTokenToFunction(calleeToken());
+    return CalleeTokenToParallelFunction(calleeToken());
 }
 
 JSFunction *
 IonFrameIterator::maybeCallee() const
 {
-    if ((isScripted() && (isFunctionFrame() || isParallelFunctionFrame())) || isNative())
+    if (isScripted() && (isFunctionFrame() || isParallelFunctionFrame()))
         return callee();
     return NULL;
 }
@@ -129,6 +125,14 @@ IonFrameIterator::isOOLPropertyOp() const
     if (type_ != IonFrame_Exit)
         return false;
     return exitFrame()->footer()->ionCode() == ION_FRAME_OOL_PROPERTY_OP;
+}
+
+bool
+IonFrameIterator::isOOLProxyGet() const
+{
+    if (type_ != IonFrame_Exit)
+        return false;
+    return exitFrame()->footer()->ionCode() == ION_FRAME_OOL_PROXY_GET;
 }
 
 bool
@@ -452,10 +456,6 @@ HandleException(ResumeFromException *rfe)
 
     IonSpew(IonSpew_Invalidate, "handling exception");
 
-    // Immediately remove any bailout frame guard that might be left over from
-    // an error in between ConvertFrames and ThunkToInterpreter.
-    js_delete(cx->mainThread().ionActivation->maybeTakeBailout());
-
     // Clear any Ion return override that's been set.
     // This may happen if a callVM function causes an invalidation (setting the
     // override), and then fails, bypassing the bailout handlers that would
@@ -523,8 +523,8 @@ HandleException(ResumeFromException *rfe)
         if (current) {
             // Unwind the frame by updating ionTop. This is necessary so that
             // (1) debugger exception unwind and leave frame hooks don't see this
-            // frame when they use StackIter, and (2) StackIter does not crash
-            // when accessing an IonScript that's destroyed by the
+            // frame when they use ScriptFrameIter, and (2) ScriptFrameIter does
+            // not crash when accessing an IonScript that's destroyed by the
             // ionScript->decref call.
             EnsureExitFrame(current);
             cx->mainThread().ionTop = (uint8_t *)current;
@@ -542,8 +542,17 @@ HandleParallelFailure(ResumeFromException *rfe)
 
     while (!iter.isEntry()) {
         parallel::Spew(parallel::SpewBailouts, "Bailing from VM reentry");
-        if (!slice->abortedScript && iter.isScripted())
-            slice->abortedScript = iter.script();
+        if (iter.isScripted()) {
+            slice->bailoutRecord->setCause(ParallelBailoutFailedIC,
+                                           iter.script(), iter.script(), NULL);
+            break;
+        }
+        ++iter;
+    }
+
+    while (!iter.isEntry()) {
+        if (iter.isScripted())
+            PropagateParallelAbort(iter.script(), iter.script());
         ++iter;
     }
 
@@ -625,7 +634,7 @@ IonActivationIterator::more() const
     return !!activation_;
 }
 
-void
+CalleeToken
 MarkCalleeToken(JSTracer *trc, CalleeToken token)
 {
     switch (GetCalleeTokenTag(token)) {
@@ -633,15 +642,13 @@ MarkCalleeToken(JSTracer *trc, CalleeToken token)
       {
         JSFunction *fun = CalleeTokenToFunction(token);
         MarkObjectRoot(trc, &fun, "ion-callee");
-        JS_ASSERT(fun == CalleeTokenToFunction(token));
-        break;
+        return CalleeToToken(fun);
       }
       case CalleeToken_Script:
       {
         JSScript *script = CalleeTokenToScript(token);
         MarkScriptRoot(trc, &script, "ion-entry");
-        JS_ASSERT(script == CalleeTokenToScript(token));
-        break;
+        return CalleeToToken(script);
       }
       default:
         JS_NOT_REACHED("unknown callee token type");
@@ -678,12 +685,30 @@ MarkActualArguments(JSTracer *trc, const IonFrameIterator &frame)
         gc::MarkValueRoot(trc, &argv[i], "ion-argv");
 }
 
+static inline void
+WriteAllocation(const IonFrameIterator &frame, const LAllocation *a, uintptr_t value)
+{
+    if (a->isGeneralReg()) {
+        Register reg = a->toGeneralReg()->reg();
+        frame.machineState().write(reg, value);
+        return;
+    }
+    if (a->isStackSlot()) {
+        uint32_t slot = a->toStackSlot()->slot();
+        *frame.jsFrame()->slotRef(slot) = value;
+        return;
+    }
+    uint32_t index = a->toArgument()->index();
+    uint8_t *argv = reinterpret_cast<uint8_t *>(frame.jsFrame()->argv());
+    *reinterpret_cast<uintptr_t *>(argv + index) = value;
+}
+
 static void
 MarkIonJSFrame(JSTracer *trc, const IonFrameIterator &frame)
 {
     IonJSFrameLayout *layout = (IonJSFrameLayout *)frame.fp();
 
-    MarkCalleeToken(trc, layout->calleeToken());
+    layout->replaceCalleeToken(MarkCalleeToken(trc, layout->calleeToken()));
 
     IonScript *ionScript = NULL;
     if (frame.checkInvalidation(&ionScript)) {
@@ -737,7 +762,12 @@ MarkIonJSFrame(JSTracer *trc, const IonFrameIterator &frame)
 
         Value v = IMPL_TO_JSVAL(layout);
         gc::MarkValueRoot(trc, &v, "ion-torn-value");
-        JS_ASSERT(v == IMPL_TO_JSVAL(layout));
+
+        if (v != IMPL_TO_JSVAL(layout)) {
+            // GC moved the value, replace the stored payload.
+            layout = JSVAL_TO_IMPL(v);
+            WriteAllocation(frame, &payload, layout.s.payload.uintptr);
+        }
     }
 #endif
 }
@@ -824,17 +854,27 @@ MarkIonExitFrame(JSTracer *trc, const IonFrameIterator &frame)
         return;
     }
 
+    if (frame.isOOLProxyGet()) {
+        IonOOLProxyGetExitFrameLayout *oolproxyget = frame.exitFrame()->oolProxyGetExit();
+        gc::MarkIonCodeRoot(trc, oolproxyget->stubCode(), "ion-ool-proxy-get-code");
+        gc::MarkValueRoot(trc, oolproxyget->vp(), "ion-ool-proxy-get-vp");
+        gc::MarkIdRoot(trc, oolproxyget->id(), "ion-ool-proxy-get-id");
+        gc::MarkObjectRoot(trc, oolproxyget->proxy(), "ion-ool-proxy-get-proxy");
+        gc::MarkObjectRoot(trc, oolproxyget->receiver(), "ion-ool-proxy-get-receiver");
+        return;
+    }
+
     if (frame.isDOMExit()) {
         IonDOMExitFrameLayout *dom = frame.exitFrame()->DOMExit();
         gc::MarkObjectRoot(trc, dom->thisObjAddress(), "ion-dom-args");
-        if (dom->isSetterFrame()) {
-            gc::MarkValueRoot(trc, dom->vp(), "ion-dom-args");
-        } else if (dom->isMethodFrame()) {
+        if (dom->isMethodFrame()) {
             IonDOMMethodExitFrameLayout *method =
                 reinterpret_cast<IonDOMMethodExitFrameLayout *>(dom);
             size_t len = method->argc() + 2;
             Value *vp = method->vp();
             gc::MarkValueRootRange(trc, len, vp, "ion-dom-args");
+        } else {
+            gc::MarkValueRoot(trc, dom->vp(), "ion-dom-args");
         }
         return;
     }

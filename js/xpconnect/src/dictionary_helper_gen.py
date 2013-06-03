@@ -211,7 +211,6 @@ def print_cpp_file(fd, conf):
              "bool\n"
              "InternStaticDictionaryJSVals(JSContext* aCx)\n"
              "{\n"
-             "  JSAutoRequest ar(aCx);\n"
              "  return\n")
     for a in attrnames:
         fd.write("    InternStaticJSVal(aCx, %s, \"%s\") &&\n"
@@ -244,9 +243,9 @@ def init_value(attribute):
         return "0"
     else:
         if realtype.count("double") and attribute.defvalue == "Infinity":
-            return "MOZ_DOUBLE_POSITIVE_INFINITY()"
+            return "mozilla::PositiveInfinity()"
         if realtype.count("double") and attribute.defvalue == "-Infinity":
-            return "MOZ_DOUBLE_NEGATIVE_INFINITY()"
+            return "mozilla::NegativeInfinity()"
         if realtype.count("nsAString"):
             return "NS_LITERAL_STRING(\"%s\")" % attribute.defvalue
         if realtype.count("nsACString"):
@@ -407,7 +406,6 @@ def write_cpp(iface, fd):
              "  JS::RootedObject obj(aCx, &aVal->toObject());\n"
              "  nsCxPusher pusher;\n"
              "  pusher.Push(aCx);\n"
-             "  JSAutoRequest ar(aCx);\n"
              "  JSAutoCompartment ac(aCx, obj);\n")
 
     fd.write("  return %s_InitInternal(*this, aCx, obj);\n}\n\n" %

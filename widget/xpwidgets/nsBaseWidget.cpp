@@ -47,7 +47,6 @@
 
 static void debug_RegisterPrefCallbacks();
 
-static bool debug_InSecureKeyboardInputMode = false;
 #endif
 
 #ifdef NOISY_WIDGET_LEAKS
@@ -875,6 +874,20 @@ void nsBaseWidget::CreateCompositor()
   CreateCompositor(rect.width, rect.height);
 }
 
+mozilla::layers::LayersBackend
+nsBaseWidget::GetPreferredCompositorBackend()
+{
+  // We need a separate preference here (instead of using mUseLayersAcceleration)
+  // because we force enable accelerated layers with e10s. Once the BasicCompositor
+  // is stable enough to be used for Ripc/Cipc, then we can remove that and this
+  // pref.
+  if (Preferences::GetBool("layers.offmainthreadcomposition.prefer-basic", false)) {
+    return mozilla::layers::LAYERS_BASIC;
+  }
+
+  return mozilla::layers::LAYERS_OPENGL;
+}
+
 void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
 {
   // Recreating this is tricky, as we may still have an old and we need
@@ -1155,26 +1168,6 @@ nsBaseWidget::HasPendingInputEvent()
 NS_IMETHODIMP
 nsBaseWidget::SetIcon(const nsAString&)
 {
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsBaseWidget::BeginSecureKeyboardInput()
-{
-#ifdef DEBUG
-  NS_ASSERTION(!debug_InSecureKeyboardInputMode, "Attempting to nest call to BeginSecureKeyboardInput!");
-  debug_InSecureKeyboardInputMode = true;
-#endif
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsBaseWidget::EndSecureKeyboardInput()
-{
-#ifdef DEBUG
-  NS_ASSERTION(debug_InSecureKeyboardInputMode, "Calling EndSecureKeyboardInput when it hasn't been enabled!");
-  debug_InSecureKeyboardInputMode = false;
-#endif
   return NS_OK;
 }
 

@@ -25,8 +25,37 @@
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/CallbackObject.h"
 
+class nsPIDOMWindow;
+
+extern nsresult
+xpc_qsUnwrapArgImpl(JSContext* cx, jsval v, const nsIID& iid, void** ppArg,
+                    nsISupports** ppArgRef, jsval* vp);
+
 namespace mozilla {
 namespace dom {
+
+struct SelfRef
+{
+  SelfRef() : ptr(nullptr) {}
+  explicit SelfRef(nsISupports *p) : ptr(p) {}
+  ~SelfRef() { NS_IF_RELEASE(ptr); }
+
+  nsISupports* ptr;
+};
+
+/** Convert a jsval to an XPCOM pointer. */
+template <class Interface, class StrongRefType>
+inline nsresult
+UnwrapArg(JSContext* cx, jsval v, Interface** ppArg,
+          StrongRefType** ppArgRef, jsval* vp)
+{
+  nsISupports* argRef = *ppArgRef;
+  nsresult rv = xpc_qsUnwrapArgImpl(cx, v, NS_GET_TEMPLATE_IID(Interface),
+                                    reinterpret_cast<void**>(ppArg), &argRef,
+                                    vp);
+  *ppArgRef = static_cast<StrongRefType*>(argRef);
+  return rv;
+}
 
 bool
 ThrowErrorMessage(JSContext* aCx, const ErrNum aErrorNumber, ...);
@@ -124,16 +153,15 @@ GetDOMClass(JSObject* obj)
   return nullptr;
 }
 
-inline bool
-UnwrapDOMObjectToISupports(JSObject* obj, nsISupports*& result)
+inline nsISupports*
+UnwrapDOMObjectToISupports(JSObject* aObject)
 {
-  const DOMClass* clasp = GetDOMClass(obj);
+  const DOMClass* clasp = GetDOMClass(aObject);
   if (!clasp || !clasp->mDOMObjectIsISupports) {
-    return false;
+    return nullptr;
   }
  
-  result = UnwrapDOMObject<nsISupports>(obj);
-  return true;
+  return UnwrapDOMObject<nsISupports>(aObject);
 }
 
 inline bool
@@ -186,33 +214,35 @@ UnwrapObject(JSContext* cx, JSObject* obj, U& value)
 }
 
 inline bool
-IsNotDateOrRegExp(JSContext* cx, JSObject* obj)
+IsNotDateOrRegExp(JSContext* cx, JS::Handle<JSObject*> obj)
 {
   MOZ_ASSERT(obj);
   return !JS_ObjectIsDate(cx, obj) && !JS_ObjectIsRegExp(cx, obj);
 }
 
 MOZ_ALWAYS_INLINE bool
-IsArrayLike(JSContext* cx, JSObject* obj)
+IsArrayLike(JSContext* cx, JS::Handle<JSObject*> obj)
 {
   return IsNotDateOrRegExp(cx, obj);
 }
 
 MOZ_ALWAYS_INLINE bool
-IsConvertibleToDictionary(JSContext* cx, JSObject* obj)
+IsObjectValueConvertibleToDictionary(JSContext* cx,
+                                     JS::Handle<JS::Value> objVal)
 {
+  JS::Rooted<JSObject*> obj(cx, &objVal.toObject());
   return IsNotDateOrRegExp(cx, obj);
 }
 
 MOZ_ALWAYS_INLINE bool
-IsConvertibleToDictionary(JSContext* cx, JS::Value val)
+IsConvertibleToDictionary(JSContext* cx, JS::Handle<JS::Value> val)
 {
   return val.isNullOrUndefined() ||
-    (val.isObject() && IsConvertibleToDictionary(cx, &val.toObject()));
+    (val.isObject() && IsObjectValueConvertibleToDictionary(cx, val));
 }
 
 MOZ_ALWAYS_INLINE bool
-IsConvertibleToCallbackInterface(JSContext* cx, JSObject* obj)
+IsConvertibleToCallbackInterface(JSContext* cx, JS::Handle<JSObject*> obj)
 {
   return IsNotDateOrRegExp(cx, obj);
 }
@@ -256,9 +286,8 @@ TraceProtoAndIfaceCache(JSTracer* trc, JSObject* obj)
     return;
   JSObject** protoAndIfaceArray = GetProtoAndIfaceArray(obj);
   for (size_t i = 0; i < kProtoAndIfaceCacheCount; ++i) {
-    JSObject* proto = protoAndIfaceArray[i];
-    if (proto) {
-      JS_CallObjectTracer(trc, proto, "protoAndIfaceArray[i]");
+    if (protoAndIfaceArray[i]) {
+      JS_CallObjectTracer(trc, &protoAndIfaceArray[i], "protoAndIfaceArray[i]");
     }
   }
 }
@@ -1352,13 +1381,6 @@ public:
 #endif
   }
 
-  T** Slot() {
-#ifdef DEBUG
-    inited = true;
-#endif
-    return &ptr;
-  }
-
   T* Ptr() {
     MOZ_ASSERT(inited);
     MOZ_ASSERT(ptr, "NonNull<T> was set to null");
@@ -1508,7 +1530,8 @@ enum StringificationBehavior {
 
 // pval must not be null and must point to a rooted JS::Value
 static inline bool
-ConvertJSValueToString(JSContext* cx, const JS::Value& v, JS::Value* pval,
+ConvertJSValueToString(JSContext* cx, JS::Handle<JS::Value> v,
+                       JS::MutableHandle<JS::Value> pval,
                        StringificationBehavior nullBehavior,
                        StringificationBehavior undefinedBehavior,
                        FakeDependentString& result)
@@ -1539,7 +1562,7 @@ ConvertJSValueToString(JSContext* cx, const JS::Value& v, JS::Value* pval,
     if (!s) {
       return false;
     }
-    pval->setString(s);  // Root the new string.
+    pval.set(JS::StringValue(s));  // Root the new string.
   }
 
   size_t len;
@@ -1563,6 +1586,12 @@ public:
       new (storage.addr()) T();
       return *storage.addr();
     }
+    template <typename T1, typename T2>
+    T& SetValue(const T1 &t1, const T2 &t2)
+    {
+      new (storage.addr()) T(t1, t2);
+      return *storage.addr();
+    }
     const T& Value() const {
       return *storage.addr();
     }
@@ -1570,6 +1599,11 @@ public:
       storage.addr()->~T();
     }
 };
+
+template<typename T>
+void DoTraceSequence(JSTracer* trc, FallibleTArray<T>& seq);
+template<typename T>
+void DoTraceSequence(JSTracer* trc, InfallibleTArray<T>& seq);
 
 // Class for simple sequence arguments, only used internally by codegen.
 template<typename T>
@@ -1582,6 +1616,210 @@ public:
   // Allow converting to const sequences as needed
   operator const Sequence<T>&() const {
     return *reinterpret_cast<const Sequence<T>*>(this);
+  }
+};
+
+// Class used to trace sequences, with specializations for various
+// sequence types.
+template<typename T, bool isDictionary=IsBaseOf<DictionaryBase, T>::value>
+class SequenceTracer
+{
+  explicit SequenceTracer() MOZ_DELETE; // Should never be instantiated
+};
+
+// sequence<object> or sequence<object?>
+template<>
+class SequenceTracer<JSObject*, false>
+{
+  explicit SequenceTracer() MOZ_DELETE; // Should never be instantiated
+
+public:
+  static void TraceSequence(JSTracer* trc, JSObject** objp, JSObject** end) {
+    for ( ; objp != end; ++objp) {
+      JS_CallObjectTracer(trc, objp, "sequence<object>");
+    }
+  }
+};
+
+// sequence<any>
+template<>
+class SequenceTracer<JS::Value, false>
+{
+  explicit SequenceTracer() MOZ_DELETE; // Should never be instantiated
+
+public:
+  static void TraceSequence(JSTracer* trc, JS::Value* valp, JS::Value* end) {
+    for ( ; valp != end; ++valp) {
+      JS_CallValueTracer(trc, valp, "sequence<any>");
+    }
+  }
+};
+
+// sequence<sequence<T>>
+template<typename T>
+class SequenceTracer<Sequence<T>, false>
+{
+  explicit SequenceTracer() MOZ_DELETE; // Should never be instantiated
+
+public:
+  static void TraceSequence(JSTracer* trc, Sequence<T>* seqp, Sequence<T>* end) {
+    for ( ; seqp != end; ++seqp) {
+      DoTraceSequence(trc, *seqp);
+    }
+  }
+};
+
+// sequence<sequence<T>> as return value
+template<typename T>
+class SequenceTracer<nsTArray<T>, false>
+{
+  explicit SequenceTracer() MOZ_DELETE; // Should never be instantiated
+
+public:
+  static void TraceSequence(JSTracer* trc, nsTArray<T>* seqp, nsTArray<T>* end) {
+    for ( ; seqp != end; ++seqp) {
+      DoTraceSequence(trc, *seqp);
+    }
+  }
+};
+
+// sequence<someDictionary>
+template<typename T>
+class SequenceTracer<T, true>
+{
+  explicit SequenceTracer() MOZ_DELETE; // Should never be instantiated
+
+public:
+  static void TraceSequence(JSTracer* trc, T* dictp, T* end) {
+    for ( ; dictp != end; ++dictp) {
+      dictp->TraceDictionary(trc);
+    }
+  }
+};
+
+// sequence<sequence<T>?>
+template<typename T>
+class SequenceTracer<Nullable<Sequence<T> >, false>
+{
+  explicit SequenceTracer() MOZ_DELETE; // Should never be instantiated
+
+public:
+  static void TraceSequence(JSTracer* trc, Nullable<Sequence<T> >* seqp,
+                            Nullable<Sequence<T> >* end) {
+    for ( ; seqp != end; ++seqp) {
+      if (!seqp->IsNull()) {
+        DoTraceSequence(trc, seqp->Value());
+      }
+    }
+  }
+};
+
+template<typename T>
+void DoTraceSequence(JSTracer* trc, FallibleTArray<T>& seq)
+{
+  SequenceTracer<T>::TraceSequence(trc, seq.Elements(),
+                                   seq.Elements() + seq.Length());
+}
+
+template<typename T>
+void DoTraceSequence(JSTracer* trc, InfallibleTArray<T>& seq)
+{
+  SequenceTracer<T>::TraceSequence(trc, seq.Elements(),
+                                   seq.Elements() + seq.Length());
+}
+
+// Rooter class for sequences; this is what we mostly use in the codegen
+template<typename T>
+class MOZ_STACK_CLASS SequenceRooter : private JS::CustomAutoRooter
+{
+public:
+  SequenceRooter(JSContext *aCx, FallibleTArray<T>* aSequence
+                 MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    : JS::CustomAutoRooter(aCx MOZ_GUARD_OBJECT_NOTIFIER_PARAM_TO_PARENT),
+      mFallibleArray(aSequence),
+      mSequenceType(eFallibleArray)
+  {
+  }
+
+  SequenceRooter(JSContext *aCx, InfallibleTArray<T>* aSequence
+                 MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    : JS::CustomAutoRooter(aCx MOZ_GUARD_OBJECT_NOTIFIER_PARAM_TO_PARENT),
+      mInfallibleArray(aSequence),
+      mSequenceType(eInfallibleArray)
+  {
+  }
+
+  SequenceRooter(JSContext *aCx, Nullable<nsTArray<T> >* aSequence
+                 MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    : JS::CustomAutoRooter(aCx MOZ_GUARD_OBJECT_NOTIFIER_PARAM_TO_PARENT),
+      mNullableArray(aSequence),
+      mSequenceType(eNullableArray)
+  {
+  }
+
+ private:
+  enum SequenceType {
+    eInfallibleArray,
+    eFallibleArray,
+    eNullableArray
+  };
+
+  virtual void trace(JSTracer *trc) MOZ_OVERRIDE
+  {
+    if (mSequenceType == eFallibleArray) {
+      DoTraceSequence(trc, *mFallibleArray);
+    } else if (mSequenceType == eInfallibleArray) {
+      DoTraceSequence(trc, *mInfallibleArray);
+    } else {
+      MOZ_ASSERT(mSequenceType == eNullableArray);
+      if (!mNullableArray->IsNull()) {
+        DoTraceSequence(trc, mNullableArray->Value());
+      }
+    }
+  }
+
+  union {
+    InfallibleTArray<T>* mInfallibleArray;
+    FallibleTArray<T>* mFallibleArray;
+    Nullable<nsTArray<T> >* mNullableArray;
+  };
+
+  SequenceType mSequenceType;
+};
+
+template<typename T>
+class MOZ_STACK_CLASS RootedDictionary : public T,
+                                         private JS::CustomAutoRooter
+{
+public:
+  RootedDictionary(JSContext* cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM) :
+    T(),
+    JS::CustomAutoRooter(cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM_TO_PARENT)
+  {
+  }
+
+  virtual void trace(JSTracer *trc) MOZ_OVERRIDE
+  {
+    this->TraceDictionary(trc);
+  }
+};
+
+template<typename T>
+class MOZ_STACK_CLASS NullableRootedDictionary : public Nullable<T>,
+                                                 private JS::CustomAutoRooter
+{
+public:
+  NullableRootedDictionary(JSContext* cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM) :
+    Nullable<T>(),
+    JS::CustomAutoRooter(cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM_TO_PARENT)
+  {
+  }
+
+  virtual void trace(JSTracer *trc) MOZ_OVERRIDE
+  {
+    if (!this->IsNull()) {
+      this->Value().TraceDictionary(trc);
+    }
   }
 };
 
@@ -1625,6 +1863,19 @@ bool
 XrayResolveNativeProperty(JSContext* cx, JS::Handle<JSObject*> wrapper,
                           JS::Handle<JSObject*> obj,
                           JS::Handle<jsid> id, JSPropertyDescriptor* desc);
+
+/**
+ * Define a property on obj through an Xray wrapper.
+ *
+ * wrapper is the Xray JS object.
+ * obj is the target object of the Xray, a binding's instance object or a
+ *     interface or interface prototype object.
+ * defined will be set to true if a property was set as a result of this call.
+ */
+bool
+XrayDefineProperty(JSContext* cx, JS::Handle<JSObject*> wrapper, 
+                   JS::Handle<JSObject*> obj, JS::Handle<jsid> id,
+                   JSPropertyDescriptor* desc, bool* defined);
 
 /**
  * This enumerates indexed or named properties of obj and operations, attributes
@@ -1768,8 +2019,9 @@ JSBool
 InterfaceHasInstance(JSContext* cx, JSHandleObject obj, JSMutableHandleValue vp,
                      JSBool* bp);
 
-// Helper for lenient getters/setters to report to console
-void
+// Helper for lenient getters/setters to report to console.  If this
+// returns false, we couldn't even get a global.
+bool
 ReportLenientThisUnwrappingFailure(JSContext* cx, JS::Handle<JSObject*> obj);
 
 inline JSObject*
@@ -1780,6 +2032,23 @@ GetUnforgeableHolder(JSObject* aGlobal, prototypes::ID aId)
   return &js::GetReservedSlot(interfaceProto,
                               DOM_INTERFACE_PROTO_SLOTS_BASE).toObject();
 }
+
+// Given a JSObject* that represents the chrome side of a JS-implemented WebIDL
+// interface, get the nsPIDOMWindow corresponding to the content side, if any.
+// A false return means an exception was thrown.
+bool
+GetWindowForJSImplementedObject(JSContext* cx, JS::Handle<JSObject*> obj,
+                                nsPIDOMWindow** window);
+
+already_AddRefed<nsPIDOMWindow>
+ConstructJSImplementation(JSContext* aCx, const char* aContractId,
+                          const GlobalObject& aGlobal,
+                          JS::MutableHandle<JSObject*> aObject,
+                          ErrorResult& aRv);
+
+bool
+RegisterForDeferredFinalization(DeferredFinalizeStartFunction start,
+                                DeferredFinalizeFunction run);
 
 } // namespace dom
 } // namespace mozilla

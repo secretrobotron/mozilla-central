@@ -57,6 +57,16 @@ XPCOMUtils.defineLazyGetter(this, "Sanitizer", function() {
   return Sanitizer;
 });
 
+XPCOMUtils.defineLazyGetter(this, "Prompt", function() {
+  let temp = {};
+  Cu.import("resource://gre/modules/Prompt.jsm", temp);
+  return temp.Prompt;
+});
+
+XPCOMUtils.defineLazyServiceGetter(this, "uuidgen",
+                                   "@mozilla.org/uuid-generator;1",
+                                   "nsIUUIDGenerator");
+
 // Lazily-loaded browser scripts:
 [
   ["HelperApps", "chrome://browser/content/HelperApps.js"],
@@ -179,6 +189,14 @@ function fuzzyEquals(a, b) {
   return (Math.abs(a - b) < 1e-6);
 }
 
+/**
+ * Convert a font size from CSS pixels (px) to twenteiths-of-a-point
+ * (twips).
+ */
+function convertFromPxToTwips(aSize) {
+  return (20.0 * 12.0 * (aSize/16.0));
+}
+
 #ifdef MOZ_CRASHREPORTER
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyServiceGetter(this, "CrashReporter",
@@ -230,6 +248,7 @@ var BrowserApp = {
   _tabs: [],
   _selectedTab: null,
   _prefObservers: [],
+  _promptHandlers: {},
 
   get isTablet() {
     let sysInfo = Cc["@mozilla.org/system-info;1"].getService(Ci.nsIPropertyBag2);
@@ -279,6 +298,7 @@ var BrowserApp = {
     Services.obs.addObserver(this, "FormHistory:Init", false);
     Services.obs.addObserver(this, "gather-telemetry", false);
     Services.obs.addObserver(this, "keyword-search", false);
+    Services.obs.addObserver(this, "Prompt:Reply", false);
 
     Services.obs.addObserver(this, "sessionstore-state-purge-complete", false);
 
@@ -310,6 +330,7 @@ var BrowserApp = {
     Downloads.init();
     FormAssistant.init();
     IndexedDB.init();
+    HealthReportStatusListener.init();
     XPInstallObserver.init();
     ClipboardHelper.init();
     CharacterEncoding.init();
@@ -415,13 +436,6 @@ var BrowserApp = {
         let newtabStrings = Strings.browser.GetStringFromName("newprivatetabpopup.opened");
         let label = PluralForm.get(1, newtabStrings).replace("#1", 1);
         NativeWindow.toast.show(label, "short");
-      });
-
-    NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.addToReadingList"),
-      NativeWindow.contextmenus.linkOpenableContext,
-      function(aTarget) {
-        let url = NativeWindow.contextmenus._getLinkURL(aTarget);
-        Services.obs.notifyObservers(null, "Reader:Add", JSON.stringify({ url: url }));
       });
 
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.copyLink"),
@@ -603,6 +617,7 @@ var BrowserApp = {
     IndexedDB.uninit();
     ViewportHandler.uninit();
     XPInstallObserver.uninit();
+    HealthReportStatusListener.uninit();
     CharacterEncoding.uninit();
     SearchEngines.uninit();
     WebappsUI.uninit();
@@ -624,7 +639,7 @@ var BrowserApp = {
   // off to the compositor.
   isBrowserContentDocumentDisplayed: function() {
     try {
-      if (window.top.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils).isFirstPaint)
+      if (!getBridge().isContentDocumentDisplayed())
         return false;
     } catch (e) {
       return false;
@@ -636,8 +651,9 @@ var BrowserApp = {
     return tab.contentDocumentIsDisplayed;
   },
 
-  displayedDocumentChanged: function() {
+  contentDocumentChanged: function() {
     window.top.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils).isFirstPaint = true;
+    getBridge().contentDocumentChanged();
   },
 
   get tabs() {
@@ -664,7 +680,7 @@ var BrowserApp = {
     Tabs.touch(aTab);
     aTab.setActive(true);
     aTab.setResolution(aTab._zoom, true);
-    this.displayedDocumentChanged();
+    this.contentDocumentChanged();
     this.deck.selectedPanel = aTab.browser;
     // Focus the browser so that things like selection will be styled correctly.
     aTab.browser.focus();
@@ -948,6 +964,14 @@ var BrowserApp = {
     webBrowserPrint.print(printSettings, download);
   },
 
+  notifyPrefObservers: function(aPref) {
+    this._prefObservers[aPref].forEach(function(aRequestId) {
+      let request = { requestId : aRequestId,
+                      preferences : [aPref] };
+      this.getPreferences(request);
+    }, this);
+  },
+
   getPreferences: function getPreferences(aPrefsRequest, aListen) {
     let prefs = [];
 
@@ -984,7 +1008,7 @@ var BrowserApp = {
           prefs.push(pref);
           continue;
         // Handle do-not-track preference
-        case "privacy.donottrackheader": {
+        case "privacy.donottrackheader":
           pref.type = "string";
 
           let enableDNT = Services.prefs.getBoolPref("privacy.donottrackheader.enabled");
@@ -998,7 +1022,28 @@ var BrowserApp = {
 
           prefs.push(pref);
           continue;
-        }
+#ifdef MOZ_CRASHREPORTER
+        // Crash reporter submit pref must be fetched from nsICrashReporter service.
+        case "datareporting.crashreporter.submitEnabled":
+          pref.type = "bool";
+          pref.value = CrashReporter.submitReports;
+          prefs.push(pref);
+          continue;
+#endif
+      }
+
+      // Pref name translation.
+      switch (prefName) {
+#ifdef MOZ_TELEMETRY_REPORTING
+        // Telemetry pref differs based on build.
+        case Telemetry.SHARED_PREF_TELEMETRY_ENABLED:
+#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
+          prefName = "toolkit.telemetry.enabledPreRelease";
+#else
+          prefName = "toolkit.telemetry.enabled";
+#endif
+          break;
+#endif
       }
 
       try {
@@ -1033,6 +1078,7 @@ var BrowserApp = {
       // determine which ui elements to show, we need to normalize these
       // preferences to be actual booleans.
       switch (prefName) {
+        case "browser.chrome.titlebarMode":
         case "network.cookie.cookieBehavior":
         case "font.size.inflation.minTwips":
           pref.type = "string";
@@ -1114,14 +1160,35 @@ var BrowserApp = {
         Services.prefs.setBoolPref(SearchEngines.PREF_SUGGEST_PROMPTED, true);
         break;
 
+#ifdef MOZ_CRASHREPORTER
+      // Crash reporter preference is in a service; set and return.
+      case "datareporting.crashreporter.submitEnabled":
+        CrashReporter.submitReports = json.value;
+        return;
+#endif
       // When sending to Java, we normalized special preferences that use
       // integers and strings to represent booleans. Here, we convert them back
       // to their actual types so we can store them.
+      case "browser.chrome.titlebarMode":
       case "network.cookie.cookieBehavior":
       case "font.size.inflation.minTwips":
         json.type = "int";
         json.value = parseInt(json.value);
         break;
+    }
+
+    // Pref name translation.
+    switch (json.name) {
+#ifdef MOZ_TELEMETRY_REPORTING
+      // Telemetry pref differs based on build.
+      case Telemetry.SHARED_PREF_TELEMETRY_ENABLED:
+#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
+        json.name = "toolkit.telemetry.enabledPreRelease";
+#else
+        json.name = "toolkit.telemetry.enabled";
+#endif
+        break;
+#endif
     }
 
     switch (json.type) {
@@ -1311,8 +1378,15 @@ var BrowserApp = {
         break;
 
       case "keyword-search":
-        // This assumes the user can only perform a keyword serach on the selected tab.
+        // This assumes that the user can only perform a keyword search on the selected tab.
         this.selectedTab.userSearch = aData;
+
+        let engine = aSubject.QueryInterface(Ci.nsISearchEngine);
+        sendMessageToJava({
+          type: "Search:Keyword",
+          identifier: engine.identifier,
+          name: engine.name,
+        });
         break;
 
       case "Browser:Quit":
@@ -1353,13 +1427,25 @@ var BrowserApp = {
         browser.contentDocument.mozCancelFullScreen();
         break;
 
+      case "Prompt:Reply":
+        {
+            let data = JSON.parse(aData);
+            let guid = data.guid;
+            let handler = this._promptHandlers[guid];
+            if (!handler)
+              break;
+            this._promptHandlers[guid];
+            handler(data);
+        }
+        break;
+
       case "Viewport:Change":
         if (this.isBrowserContentDocumentDisplayed())
           this.selectedTab.setViewport(JSON.parse(aData));
         break;
 
       case "Viewport:Flush":
-        this.displayedDocumentChanged();
+        this.contentDocumentChanged();
         break;
 
       case "Passwords:Init": {
@@ -1392,11 +1478,7 @@ var BrowserApp = {
         break;
 
       case "nsPref:changed":
-        for each (let requestId in this._prefObservers[aData]) {
-          let request = { requestId : requestId,
-                          preferences : [ aData ] };
-          this.getPreferences(request, false);
-        }
+        this.notifyPrefObservers(aData);
         break;
 
       default:
@@ -1421,9 +1503,12 @@ var BrowserApp = {
   // selecting selIndex(if fromIndex<=selIndex<=toIndex)
   showHistory: function(fromIndex, toIndex, selIndex) {
     let browser = this.selectedBrowser;
+    let guid = uuidgen.generateUUID().toString();
     let result = {
       type: "Prompt:Show",
       multiple: false,
+      async: true,
+      guid: guid,
       selected: [],
       listitems: []
     };
@@ -1440,11 +1525,13 @@ var BrowserApp = {
       result.listitems.push(item);
       result.selected.push(i == selIndex);
     }
-    let data = JSON.parse(sendMessageToJava(result));
-    let selected = data.button;
-    if (selected == -1)
-      return;
-    browser.gotoIndex(toIndex-selected);
+    this._promptHandlers[guid] = function (data) {
+        let selected = data.button;
+        if (selected == -1)
+          return;
+        browser.gotoIndex(toIndex-selected);
+    };
+    sendMessageToJava(result);
   },
 };
 
@@ -1589,7 +1676,7 @@ var NativeWindow = {
       if (this.doorhanger._callbacks[reply_id]) {
         // Pass the value of the optional checkbox to the callback
         let checked = data["checked"];
-        this.doorhanger._callbacks[reply_id].cb(checked);
+        this.doorhanger._callbacks[reply_id].cb(checked, data.inputs);
 
         let prompt = this.doorhanger._callbacks[reply_id].prompt;
         for (let id in this.doorhanger._callbacks) {
@@ -2395,6 +2482,8 @@ function Tab(aURL, aParams) {
   this.originalURI = null;
   this.savedArticle = null;
   this.hasTouchListener = false;
+  this.browserWidth = 0;
+  this.browserHeight = 0;
 
   this.create(aURL, aParams);
 }
@@ -2542,16 +2631,45 @@ Tab.prototype = {
     }
   },
 
+  /**
+   * Retrieves the font size in twips for a given element.
+   */
+  getFontSizeInTwipsFor: function(aElement) {
+    // GetComputedStyle should always give us CSS pixels for a font size.
+    let fontSizeStr = this.window.getComputedStyle(aElement)['fontSize'];
+    let fontSize = fontSizeStr.slice(0, -2);
+    // This is in px, so we want to convert it to points then to twips.
+    return convertFromPxToTwips(fontSize);
+  },
+
+  /**
+   * This returns the zoom necessary to match the font size of an element to
+   * the minimum font size specified by the browser.zoom.reflowOnZoom.minFontSizeTwips
+   * preference.
+   */
+  getZoomToMinFontSize: function(aElement) {
+    let currentZoom = this._zoom;
+    let minFontSize = Services.prefs.getIntPref("browser.zoom.reflowZoom.minFontSizeTwips");
+    let curFontSize = this.getFontSizeInTwipsFor(aElement);
+    if (!fuzzyEquals(curFontSize*(currentZoom), minFontSize)) {
+      return 1.0 + minFontSize / curFontSize;
+    }
+
+    return 1.0;
+  },
+
   performReflowOnZoom: function(aViewport) {
-      let viewportWidth = gScreenWidth / aViewport.zoom;
+      let zoom = this._drawZoom ? this._drawZoom : aViewport.zoom;
+
+      let viewportWidth = gScreenWidth / zoom;
       let reflozTimeout = Services.prefs.getIntPref("browser.zoom.reflowZoom.reflowTimeout");
 
       if (gReflowPending) {
         clearTimeout(gReflowPending);
       }
 
-      // We add in a bit of fudge just so that the end characters don't accidentally
-      // get clipped. 15px is an arbitrary choice.
+      // We add in a bit of fudge just so that the end characters
+      // don't accidentally get clipped. 15px is an arbitrary choice.
       gReflowPending = setTimeout(doChangeMaxLineBoxWidth,
                                   reflozTimeout,
                                   viewportWidth - 15);
@@ -2906,7 +3024,21 @@ Tab.prototype = {
 
     // Adjust the max line box width to be no more than the viewport width, but
     // only if the reflow-on-zoom preference is enabled.
-    let isZooming = Math.abs(aViewport.zoom - this._zoom) >= 1e-6;
+    let isZooming = !fuzzyEquals(aViewport.zoom, this._zoom);
+    if (BrowserApp.selectedTab.reflozPinchSeen &&
+        isZooming && aViewport.zoom < 1.0) {
+      // In this case, we want to restore the max line box width,
+      // because we are pinch-zooming to zoom out.
+      BrowserEventHandler.resetMaxLineBoxWidth();
+      BrowserApp.selectedTab.reflozPinchSeen = false;
+    } else if (BrowserApp.selectedTab.reflozPinchSeen &&
+               isZooming) {
+      // In this case, the user pinch-zoomed in, so we don't want to
+      // preserve position as we would with reflow-on-zoom.
+      BrowserApp.selectedTab.probablyNeedRefloz = false;
+      BrowserApp.selectedTab._mReflozPoint = null;
+    }
+
     if (isZooming &&
         BrowserEventHandler.mReflozPref &&
         BrowserApp.selectedTab._mReflozPoint &&
@@ -3048,12 +3180,25 @@ Tab.prototype = {
       // within the screen size, so remeasure when the page size remains within
       // the threshold of screen + margins, in case it's sizing itself relative
       // to the viewport.
-      if (((Math.round(viewport.pageBottom - viewport.pageTop)
-              <= gScreenHeight + gViewportMargins.top + gViewportMargins.bottom)
-             != this.viewportExcludesVerticalMargins) ||
-          ((Math.round(viewport.pageRight - viewport.pageLeft)
-              <= gScreenWidth + gViewportMargins.left + gViewportMargins.right)
-             != this.viewportExcludesHorizontalMargins)) {
+      let hasHorizontalMargins = gViewportMargins.left > 0 || gViewportMargins.right > 0;
+      let hasVerticalMargins = gViewportMargins.top > 0 || gViewportMargins.bottom > 0;
+      let pageHeightGreaterThanScreenHeight, pageWidthGreaterThanScreenWidth;
+
+      if (hasHorizontalMargins) {
+        pageWidthGreaterThanScreenWidth =
+            Math.round(viewport.pageRight - viewport.pageLeft)
+            > gScreenWidth + gViewportMargins.left + gViewportMargins.right;
+      }
+      if (hasVerticalMargins) {
+        pageHeightGreaterThanScreenHeight =
+            Math.round(viewport.pageBottom - viewport.pageTop)
+            > gScreenHeight + gViewportMargins.top + gViewportMargins.bottom;
+      }
+
+      if ((hasHorizontalMargins
+           && (pageWidthGreaterThanScreenWidth != this.viewportExcludesHorizontalMargins)) ||
+          (hasVerticalMargins
+           && (pageHeightGreaterThanScreenHeight != this.viewportExcludesVerticalMargins))) {
         if (!this.viewportMeasureCallback) {
           this.viewportMeasureCallback = setTimeout(function() {
             this.viewportMeasureCallback = null;
@@ -3067,6 +3212,12 @@ Tab.prototype = {
             }
           }.bind(this), kViewportRemeasureThrottle);
         }
+      } else if (this.viewportMeasureCallback) {
+        // If the page changed size twice since we last measured the viewport and
+        // the latest size change reveals we don't need to remeasure, cancel any
+        // pending remeasure.
+        clearTimeout(this.viewportMeasureCallback);
+        this.viewportMeasureCallback = null;
       }
     }
   },
@@ -3692,7 +3843,7 @@ Tab.prototype = {
         let contentDocument = aSubject;
         if (contentDocument == this.browser.contentDocument) {
           if (BrowserApp.selectedTab == this) {
-            BrowserApp.displayedDocumentChanged();
+            BrowserApp.contentDocumentChanged();
           }
           this.contentDocumentIsDisplayed = true;
 
@@ -3786,10 +3937,15 @@ var BrowserEventHandler = {
   },
 
   resetMaxLineBoxWidth: function() {
-    let webNav = window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIWebNavigation);
-    let docShell = webNav.QueryInterface(Ci.nsIDocShell);
-    let docViewer = docShell.contentViewer.QueryInterface(Ci.nsIMarkupDocumentViewer);
-    docViewer.changeMaxLineBoxWidth(0);
+    BrowserApp.selectedTab.probablyNeedRefloz = false;
+
+    if (gReflowPending) {
+      clearTimeout(gReflowPending);
+    }
+
+    let reflozTimeout = Services.prefs.getIntPref("browser.zoom.reflowZoom.reflowTimeout");
+    gReflowPending = setTimeout(doChangeMaxLineBoxWidth,
+                                reflozTimeout, 0);
   },
 
   updateReflozPref: function() {
@@ -4020,6 +4176,18 @@ var BrowserEventHandler = {
   onDoubleTap: function(aData) {
     let data = JSON.parse(aData);
 
+    // We only want to do this if reflow-on-zoom is enabled.
+    if (BrowserEventHandler.mReflozPref &&
+       !BrowserApp.selectedTab._mReflozPoint) {
+     let data = JSON.parse(aData);
+     let zoomPointX = data.x;
+     let zoomPointY = data.y;
+
+     BrowserApp.selectedTab._mReflozPoint = { x: zoomPointX, y: zoomPointY,
+       range: BrowserApp.selectedBrowser.contentDocument.caretPositionFromPoint(zoomPointX, zoomPointY) };
+       BrowserApp.selectedTab.probablyNeedRefloz = true;
+    }
+
     let zoom = BrowserApp.selectedTab._zoom;
     let element = ElementTouchHelper.anyElementFromPoint(data.x, data.y);
     if (!element) {
@@ -4054,9 +4222,21 @@ var BrowserEventHandler = {
 
     // if the rect is already taking up most of the visible area and is stretching the
     // width of the page, then we want to zoom out instead.
-    if (this._isRectZoomedIn(bRect, viewport)) {
-      if (aCanZoomOut)
+    if (BrowserEventHandler.mReflozPref) {
+      let zoomFactor = BrowserApp.selectedTab.getZoomToMinFontSize(aElement);
+
+      bRect.width = zoomFactor == 1.0 ? bRect.width : gScreenWidth / zoomFactor;
+      bRect.height = zoomFactor == 1.0 ? bRect.height : bRect.height / zoomFactor;
+      if (zoomFactor == 1.0 || this._isRectZoomedIn(bRect, viewport)) {
+        if (aCanZoomOut) {
+          this._zoomOut();
+        }
+        return;
+      }
+    } else if (this._isRectZoomedIn(bRect, viewport)) {
+      if (aCanZoomOut) {
         this._zoomOut();
+      }
       return;
     }
 
@@ -4240,8 +4420,7 @@ var BrowserEventHandler = {
        * - It's a select element showing multiple rows
        */
       if (checkElem) {
-        if (((elem.scrollHeight > elem.clientHeight) ||
-             (elem.scrollWidth > elem.clientWidth)) &&
+        if ((elem.scrollTopMax > 0 || elem.scrollLeftMax > 0) &&
             (this._hasScrollableOverflow(elem) ||
              elem.mozMatchesSelector("html, body, textarea")) ||
             (elem instanceof HTMLSelectElement && (elem.size > 1 || elem.multiple))) {
@@ -4272,10 +4451,10 @@ var BrowserEventHandler = {
 
   _elementCanScroll: function(elem, x, y) {
     let scrollX = (x < 0 && elem.scrollLeft > 0)
-               || (x > 0 && elem.scrollLeft < (elem.scrollWidth - elem.clientWidth));
+               || (x > 0 && elem.scrollLeft < elem.scrollLeftMax);
 
     let scrollY = (y < 0 && elem.scrollTop > 0)
-               || (y > 0 && elem.scrollTop < (elem.scrollHeight - elem.clientHeight));
+               || (y > 0 && elem.scrollTop < elem.scrollTopMax);
 
     return scrollX || scrollY;
   }
@@ -4660,7 +4839,7 @@ var FormAssistant = {
 
           if (this._showValidationMessage(focused))
             break;
-          this._showAutoCompleteSuggestions(focused);
+          this._showAutoCompleteSuggestions(focused, function () {});
         } else {
           // temporarily hide the form assist popup while we're panning or zooming the page
           this._hideFormAssistPopup();
@@ -4730,8 +4909,14 @@ var FormAssistant = {
         // only be available if an invalid form was submitted)
         if (this._showValidationMessage(currentElement))
           break;
-        if (!this._showAutoCompleteSuggestions(currentElement))
-          this._hideFormAssistPopup();
+
+        let checkResultsClick = hasResults => {
+          if (!hasResults) {
+            this._hideFormAssistPopup();
+          }
+        };
+
+        this._showAutoCompleteSuggestions(currentElement, checkResultsClick);
         break;
 
       case "input":
@@ -4739,13 +4924,18 @@ var FormAssistant = {
 
         // Since we can only show one popup at a time, prioritze autocomplete
         // suggestions over a form validation message
-        if (this._showAutoCompleteSuggestions(currentElement))
-          break;
-        if (this._showValidationMessage(currentElement))
-          break;
+        let checkResultsInput = hasResults => {
+          if (hasResults)
+            return;
 
-        // If we're not showing autocomplete suggestions, hide the form assist popup
-        this._hideFormAssistPopup();
+          if (this._showValidationMessage(currentElement))
+            return;
+
+          // If we're not showing autocomplete suggestions, hide the form assist popup
+          this._hideFormAssistPopup();
+        };
+
+        this._showAutoCompleteSuggestions(currentElement, checkResultsInput);
         break;
 
       // Reset invalid submit state on each pageshow
@@ -4769,27 +4959,31 @@ var FormAssistant = {
   },
 
   // Retrieves autocomplete suggestions for an element from the form autocomplete service.
-  _getAutoCompleteSuggestions: function _getAutoCompleteSuggestions(aSearchString, aElement) {
+  // aCallback(array_of_suggestions) is called when results are available.
+  _getAutoCompleteSuggestions: function _getAutoCompleteSuggestions(aSearchString, aElement, aCallback) {
     // Cache the form autocomplete service for future use
     if (!this._formAutoCompleteService)
       this._formAutoCompleteService = Cc["@mozilla.org/satchel/form-autocomplete;1"].
                                       getService(Ci.nsIFormAutoComplete);
 
-    let results = this._formAutoCompleteService.autoCompleteSearch(aElement.name || aElement.id,
-                                                                   aSearchString, aElement, null);
-    let suggestions = [];
-    for (let i = 0; i < results.matchCount; i++) {
-      let value = results.getValueAt(i);
+    let resultsAvailable = function (results) {
+      let suggestions = [];
+      for (let i = 0; i < results.matchCount; i++) {
+        let value = results.getValueAt(i);
 
-      // Do not show the value if it is the current one in the input field
-      if (value == aSearchString)
-        continue;
+        // Do not show the value if it is the current one in the input field
+        if (value == aSearchString)
+          continue;
 
-      // Supply a label and value, since they can differ for datalist suggestions
-      suggestions.push({ label: value, value: value });
-    }
+        // Supply a label and value, since they can differ for datalist suggestions
+        suggestions.push({ label: value, value: value });
+      }
+      aCallback(suggestions);
+    };
 
-    return suggestions;
+    this._formAutoCompleteService.autoCompleteSearchAsync(aElement.name || aElement.id,
+                                                          aSearchString, aElement, null,
+                                                          resultsAvailable);
   },
 
   /**
@@ -4826,40 +5020,47 @@ var FormAssistant = {
   },
 
   // Retrieves autocomplete suggestions for an element from the form autocomplete service
-  // and sends the suggestions to the Java UI, along with element position data.
-  // Returns true if there are suggestions to show, false otherwise.
-  _showAutoCompleteSuggestions: function _showAutoCompleteSuggestions(aElement) {
-    if (!this._isAutoComplete(aElement))
-      return false;
+  // and sends the suggestions to the Java UI, along with element position data. As
+  // autocomplete queries are asynchronous, calls aCallback when done with a true
+  // argument if results were found and false if no results were found.
+  _showAutoCompleteSuggestions: function _showAutoCompleteSuggestions(aElement, aCallback) {
+    if (!this._isAutoComplete(aElement)) {
+      aCallback(false);
+      return;
+    }
 
     // Don't display the form auto-complete popup after the user starts typing
     // to avoid confusing somes IME. See bug 758820 and bug 632744.
     if (this._isBlocklisted && aElement.value.length > 0) {
-      return false;
+      aCallback(false);
+      return;
     }
 
-    let autoCompleteSuggestions = this._getAutoCompleteSuggestions(aElement.value, aElement);
-    let listSuggestions = this._getListSuggestions(aElement);
+    let resultsAvailable = autoCompleteSuggestions => {
+      // On desktop, we show datalist suggestions below autocomplete suggestions,
+      // without duplicates removed.
+      let listSuggestions = this._getListSuggestions(aElement);
+      let suggestions = autoCompleteSuggestions.concat(listSuggestions);
 
-    // On desktop, we show datalist suggestions below autocomplete suggestions,
-    // without duplicates removed.
-    let suggestions = autoCompleteSuggestions.concat(listSuggestions);
+      // Return false if there are no suggestions to show
+      if (!suggestions.length) {
+        aCallback(false);
+        return;
+      }
 
-    // Return false if there are no suggestions to show
-    if (!suggestions.length)
-      return false;
+      sendMessageToJava({
+        type:  "FormAssist:AutoComplete",
+        suggestions: suggestions,
+        rect: ElementTouchHelper.getBoundingContentRect(aElement)
+      });
 
-    sendMessageToJava({
-      type:  "FormAssist:AutoComplete",
-      suggestions: suggestions,
-      rect: ElementTouchHelper.getBoundingContentRect(aElement)
-    });
+      // Keep track of input element so we can fill it in if the user
+      // selects an autocomplete suggestion
+      this._currentInputElement = aElement;
+      aCallback(true);
+    };
 
-    // Keep track of input element so we can fill it in if the user
-    // selects an autocomplete suggestion
-    this._currentInputElement = aElement;
-
-    return true;
+    this._getAutoCompleteSuggestions(aElement.value, aElement, resultsAvailable);
   },
 
   // Only show a validation message if the user submitted an invalid form,
@@ -4894,6 +5095,157 @@ var FormAssistant = {
   _hideFormAssistPopup: function _hideFormAssistPopup() {
     sendMessageToJava({ type: "FormAssist:Hide" });
   }
+};
+
+/**
+ * An object to watch for Gecko status changes -- add-on installs, pref changes
+ * -- and reflect them back to Java.
+ */
+let HealthReportStatusListener = {
+  TELEMETRY_PREF: 
+#ifdef MOZ_TELEMETRY_REPORTING
+    // Telemetry pref differs based on build.
+#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
+    "toolkit.telemetry.enabledPreRelease",
+#else
+    "toolkit.telemetry.enabled",
+#endif
+#else
+    null,
+#endif
+
+  init: function () {
+    try {
+      AddonManager.addAddonListener(this);
+    } catch (ex) {
+      console.log("Failed to initialize add-on status listener. FHR cannot report add-on state. " + ex);
+    }
+
+    Services.obs.addObserver(this, "Addons:FetchAll", false);
+    Services.prefs.addObserver("extensions.blocklist.enabled", this, false);
+    if (this.TELEMETRY_PREF) {
+      Services.prefs.addObserver(this.TELEMETRY_PREF, this, false);
+    }
+  },
+
+  uninit: function () {
+    Services.obs.removeObserver(this, "Addons:FetchAll");
+    Services.prefs.removeObserver("extensions.blocklist.enabled", this);
+    if (this.TELEMETRY_PREF) {
+      Services.prefs.removeObserver(this.TELEMETRY_PREF, this);
+    }
+
+    AddonManager.removeAddonListener(this);
+  },
+
+  observe: function (aSubject, aTopic, aData) {
+    switch (aTopic) {
+      case "Addons:FetchAll":
+        HealthReportStatusListener.sendAllAddonsToJava();
+        break;
+      case "nsPref:changed":
+        sendMessageToJava({ type: "Pref:Change", pref: aData, value: Services.prefs.getBoolPref(aData) });
+        break
+    }
+  },
+
+  MILLISECONDS_PER_DAY: 24 * 60 * 60 * 1000,
+
+  COPY_FIELDS: [
+    "userDisabled",
+    "appDisabled",
+    "version",
+    "type",
+    "scope",
+    "foreignInstall",
+    "hasBinaryComponents",
+  ],
+
+  // Add-on types for which full details are recorded in FHR.
+  // All other types are ignored.
+  FULL_DETAIL_TYPES: [
+    "plugin",
+    "extension",
+    "service",
+  ],
+
+  /**
+   * Return true if either the add-on has opted out of AMO updates, and thus
+   * we shouldn't provide details to FHR, or it's an add-on type that we
+   * don't want to report details for.
+   * These add-ons will still make it over to Java, but will be filtered out.
+   */
+  _shouldIgnore: function (aAddon) {
+    // TODO: check this pref. If it's false, the add-on has opted out of
+    // AMO updates, and should not be reported.
+    let optOutPref = "extensions." + aAddon.id + ".getAddons.cache.enabled";
+    if (this.FULL_DETAIL_TYPES.indexOf(aAddon.type) == -1) {
+      return true;
+    }
+    return false;
+  },
+
+  _dateToDays: function (aDate) {
+    return Math.floor(aDate.getTime() / this.MILLISECONDS_PER_DAY);
+  },
+
+  jsonForAddon: function (aAddon) {
+    let o = {};
+    if (aAddon.installDate) {
+      o.installDay = this._dateToDays(aAddon.installDate);
+    }
+    if (aAddon.updateDate) {
+      o.updateDay = this._dateToDays(aAddon.updateDate);
+    }
+
+    for (let field of this.COPY_FIELDS) {
+      o[field] = aAddon[field];
+    }
+
+    return o;
+  },
+
+  notifyJava: function (aAddon, aNeedsRestart) {
+    let json = this.jsonForAddon(aAddon);
+    if (this._shouldIgnore(aAddon)) {
+      json.ignore = true;
+    }
+    sendMessageToJava({ type: "Addons:Change", id: aAddon.id, json: json });
+  },
+
+  // Add-on listeners.
+  onEnabling: function (aAddon, aNeedsRestart) {
+    this.notifyJava(aAddon, aNeedsRestart);
+  },
+  onDisabling: function (aAddon, aNeedsRestart) {
+    this.notifyJava(aAddon, aNeedsRestart);
+  },
+  onInstalling: function (aAddon, aNeedsRestart) {
+    this.notifyJava(aAddon, aNeedsRestart);
+  },
+  onUninstalling: function (aAddon, aNeedsRestart) {
+    this.notifyJava(aAddon, aNeedsRestart);
+  },
+  onPropertyChanged: function (aAddon, aProperties) {
+    this.notifyJava(aAddon);
+  },
+
+  sendAllAddonsToJava: function () {
+    AddonManager.getAllAddons(function (aAddons) {
+        let json = {};
+        if (aAddons) {
+          for (let i = 0; i < aAddons.length; ++i) {
+            let addon = aAddons[i];
+            let addonJSON = HealthReportStatusListener.jsonForAddon(addon);
+            if (HealthReportStatusListener._shouldIgnore(addon)) {
+              addonJSON.ignore = true;
+            }
+            json[addon.id] = addonJSON;
+          }
+        }
+        sendMessageToJava({ type: "Addons:All", json: json });
+      });
+  },
 };
 
 var XPInstallObserver = {
@@ -5895,6 +6247,7 @@ var SearchEngines = {
     let searchEngines = engineData.map(function (engine) {
       return {
         name: engine.name,
+        identifier: engine.identifier,
         iconURI: (engine.iconURI ? engine.iconURI.spec : null)
       };
     });
@@ -6225,13 +6578,16 @@ var WebappsUI = {
                     origin: aData.app.origin,
                     iconURL: fullsizeIcon
                   });
-                  let message = Strings.browser.GetStringFromName("webapps.alertSuccess");
-                  let alerts = Cc["@mozilla.org/alerts-service;1"].getService(Ci.nsIAlertsService);
-                  alerts.showAlertNotification("drawable://alert_app", manifest.name, message, true, "", {
-                    observe: function () {
-                      self.openURL(aData.app.manifestURL, aData.app.origin);
-                    }
-                  }, "webapp");
+                  if (!!aData.isPackage) {
+                    // For packaged apps, put a notification in the notification bar.
+                    let message = Strings.browser.GetStringFromName("webapps.alertSuccess");
+                    let alerts = Cc["@mozilla.org/alerts-service;1"].getService(Ci.nsIAlertsService);
+                    alerts.showAlertNotification("drawable://alert_app", manifest.name, message, true, "", {
+                      observe: function () {
+                        self.openURL(aData.app.manifestURL, aData.app.origin);
+                      }
+                    }, "webapp");
+                  }
                 } catch(ex) {
                   console.log(ex);
                 }
@@ -6424,30 +6780,14 @@ var RemoteDebugger = {
 };
 
 var Telemetry = {
-#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
-  _PREF_TELEMETRY_ENABLED: "toolkit.telemetry.enabledPreRelease",
-  _PREF_TELEMETRY_DISPLAYED: "toolkit.telemetry.notifiedOptOut",
-#else
-  _PREF_TELEMETRY_ENABLED: "toolkit.telemetry.enabled",
-  _PREF_TELEMETRY_DISPLAYED: "toolkit.telemetry.prompted",
-#endif
-  _PREF_TELEMETRY_REJECTED: "toolkit.telemetry.rejected",
-  _PREF_TELEMETRY_SERVER_OWNER: "toolkit.telemetry.server_owner",
-
-  // This is used to reprompt Beta/GA users and notify again
-  // Nightly/Aurora users when privacy message changes
-  _TELEMETRY_DISPLAY_REV: @MOZ_TELEMETRY_DISPLAY_REV@,
+  SHARED_PREF_TELEMETRY_ENABLED: "datareporting.telemetry.enabled",
 
   init: function init() {
-    Services.obs.addObserver(this, "Preferences:Set", false);
     Services.obs.addObserver(this, "Telemetry:Add", false);
-    Services.obs.addObserver(this, "Telemetry:Prompt", false);
   },
 
   uninit: function uninit() {
-    Services.obs.removeObserver(this, "Preferences:Set");
     Services.obs.removeObserver(this, "Telemetry:Add");
-    Services.obs.removeObserver(this, "Telemetry:Prompt");
   },
 
   addData: function addData(aHistogramId, aValue) {
@@ -6457,131 +6797,10 @@ var Telemetry = {
   },
 
   observe: function observe(aSubject, aTopic, aData) {
-    if (aTopic == "Preferences:Set") {
-      // if user changes telemetry pref, treat it like they have been prompted
-      let pref = JSON.parse(aData);
-      if (pref.name == this._PREF_TELEMETRY_ENABLED) {
-        Services.prefs.setIntPref(this._PREF_TELEMETRY_DISPLAYED, this._TELEMETRY_DISPLAY_REV);
-        Services.prefs.setBoolPref(this._PREF_TELEMETRY_REJECTED, !pref.value);
-      }
-    } else if (aTopic == "Telemetry:Add") {
+    if (aTopic == "Telemetry:Add") {
       let json = JSON.parse(aData);
       this.addData(json.name, json.value);
-    } else if (aTopic == "Telemetry:Prompt") {
-#ifdef MOZ_TELEMETRY_REPORTING
-      this.prompt();
-#endif
     }
-  },
-
-  prompt: function prompt() {
-    let brandShortName = Strings.brand.GetStringFromName("brandShortName");
-    let serverOwner = Services.prefs.getCharPref(this._PREF_TELEMETRY_SERVER_OWNER);
-    let telemetryEnabled = Services.prefs.getBoolPref(this._PREF_TELEMETRY_ENABLED);
-    let message;
-    let buttons;
-    let self = this;
-
-    /*
-     * Display an opt-out notification when telemetry is enabled by default,
-     * an opt-in prompt otherwise.
-     *
-     * But do not display this prompt/notification if:
-     *
-     * - The last accepted/refused policy (either by accepting the prompt or by
-     *   manually flipping the telemetry preference) is already at version
-     *   TELEMETRY_DISPLAY_REV or higher (to avoid the prompt in tests).
-     */
-    let telemetryDisplayed;
-    try {
-      telemetryDisplayed = Services.prefs.getIntPref(self._PREF_TELEMETRY_DISPLAYED);
-    } catch(e) {}
-    if (telemetryDisplayed >= self._TELEMETRY_DISPLAY_REV)
-      return;
-
-#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
-    /*
-     * Additionally, in opt-out builds, don't display the notification if:
-     *
-     * - Telemetry is disabled
-     * - Telemetry was explicitly refused through the UI
-     * - Opt-in telemetry was already enabled, don't notify the user until next
-     *   policy update. (Do the check only at first run with opt-out builds)
-     */
-
-    let telemetryEnabled = Services.prefs.getBoolPref(self._PREF_TELEMETRY_ENABLED);
-    if (!telemetryEnabled)
-      return;
-
-    // If telemetry was explicitly refused through the UI,
-    // also disable opt-out telemetry and bail out.
-    let telemetryRejected = false;
-    try {
-      telemetryRejected = Services.prefs.getBoolPref(self._PREF_TELEMETRY_REJECTED);
-    } catch(e) {}
-    if (telemetryRejected) {
-      Services.prefs.setBoolPref(self._PREF_TELEMETRY_ENABLED, false);
-      Services.prefs.setIntPref(self._PREF_TELEMETRY_DISPLAYED, self._TELEMETRY_DISPLAY_REV);
-      return;
-    }
-
-    // If opt-in telemetry was already enabled, don't notify the user until next
-    // policy update. (Do the check only at first run with opt-out builds)
-    let optInTelemetryEnabled = false;
-    try {
-      optInTelemetryEnabled = Services.prefs.getBoolPref("toolkit.telemetry.enabled");
-    } catch(e) {}
-    if (optInTelemetryEnabled && telemetryDisplayed === undefined) {
-      Services.prefs.setBoolPref(self._PREF_TELEMETRY_REJECTED, false);
-      Services.prefs.setIntPref(self._PREF_TELEMETRY_DISPLAYED, self._TELEMETRY_DISPLAY_REV);
-      return;
-    }
-
-    message = Strings.browser.formatStringFromName("telemetry.optout.message2",
-                                                    [brandShortName, serverOwner, brandShortName], 3);
-    buttons = [
-      {
-        label: Strings.browser.GetStringFromName("telemetry.optout.ok"),
-        callback: function () {
-          Services.prefs.setIntPref(self._PREF_TELEMETRY_DISPLAYED, self._TELEMETRY_DISPLAY_REV);
-        }
-      }
-    ];
-#else
-    // Clear old prefs and reprompt
-    Services.prefs.clearUserPref(self._PREF_TELEMETRY_DISPLAYED);
-    Services.prefs.clearUserPref(self._PREF_TELEMETRY_ENABLED);
-    Services.prefs.clearUserPref(self._PREF_TELEMETRY_REJECTED);
-
-    message = Strings.browser.formatStringFromName("telemetry.optin.message2",
-                                                  [serverOwner, brandShortName], 2);
-    buttons = [
-      {
-        label: Strings.browser.GetStringFromName("telemetry.optin.send"),
-        callback: function () {
-          Services.prefs.setIntPref(self._PREF_TELEMETRY_DISPLAYED, self._TELEMETRY_DISPLAY_REV);
-          Services.prefs.setBoolPref(self._PREF_TELEMETRY_ENABLED, true);
-        }
-      },
-      {
-        label: Strings.browser.GetStringFromName("telemetry.optin.dontSend"),
-        callback: function () {
-          Services.prefs.setIntPref(self._PREF_TELEMETRY_DISPLAYED, self._TELEMETRY_DISPLAY_REV);
-          Services.prefs.setBoolPref(self._PREF_TELEMETRY_REJECTED, true);
-        }
-      }
-    ];
-#endif
-    let learnMoreLabel = Strings.browser.GetStringFromName("telemetry.optin.learnMore");
-    let learnMoreUrl = Services.urlFormatter.formatURLPref("app.support.baseURL");
-    learnMoreUrl += "how-can-i-help-submitting-performance-data";
-    let options = {
-      link: {
-        label: learnMoreLabel,
-        url: learnMoreUrl
-      }
-    };
-    NativeWindow.doorhanger.show(message, "telemetry-prompt", buttons, BrowserApp.selectedTab.id, options);
   },
 };
 

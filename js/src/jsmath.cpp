@@ -8,13 +8,24 @@
  * JS math package.
  */
 
+#if defined(XP_WIN)
+/* _CRT_RAND_S must be #defined before #including stdlib.h to get rand_s(). */
+#define _CRT_RAND_S
+#endif
+
 #include "jsmath.h"
 
 #include "mozilla/Constants.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/MathAlgorithms.h"
 
+#include <fcntl.h>
 #include <stdlib.h>
+
+#ifdef XP_UNIX
+# include <unistd.h>
+#endif
+
 #include "jstypes.h"
 #include "prmjtime.h"
 #include "jsapi.h"
@@ -29,6 +40,16 @@
 using namespace js;
 
 using mozilla::Abs;
+using mozilla::DoubleIsInt32;
+using mozilla::ExponentComponent;
+using mozilla::IsFinite;
+using mozilla::IsInfinite;
+using mozilla::IsNaN;
+using mozilla::IsNegative;
+using mozilla::IsNegativeZero;
+using mozilla::PositiveInfinity;
+using mozilla::NegativeInfinity;
+using mozilla::SpecificNaN;
 
 #ifndef M_E
 #define M_E             2.7182818284590452354
@@ -68,8 +89,8 @@ MathCache::MathCache() {
     memset(table, 0, sizeof(table));
 
     /* See comments in lookup(). */
-    JS_ASSERT(MOZ_DOUBLE_IS_NEGATIVE_ZERO(-0.0));
-    JS_ASSERT(!MOZ_DOUBLE_IS_NEGATIVE_ZERO(+0.0));
+    JS_ASSERT(IsNegativeZero(-0.0));
+    JS_ASSERT(!IsNegativeZero(+0.0));
     JS_ASSERT(hash(-0.0) != hash(+0.0));
 }
 
@@ -201,7 +222,7 @@ js::ecmaAtan2(double x, double y)
      * - The sign of x determines the sign of the result.
      * - The sign of y determines the multiplicator, 1 or 3.
      */
-    if (MOZ_DOUBLE_IS_INFINITE(x) && MOZ_DOUBLE_IS_INFINITE(y)) {
+    if (IsInfinite(x) && IsInfinite(y)) {
         double z = js_copysign(M_PI / 4, x);
         if (y < 0)
             z *= 3;
@@ -291,7 +312,7 @@ double
 js::math_exp_impl(MathCache *cache, double x)
 {
 #ifdef _WIN32
-    if (!MOZ_DOUBLE_IS_NaN(x)) {
+    if (!IsNaN(x)) {
         if (x == js_PositiveInfinity)
             return js_PositiveInfinity;
         if (x == js_NegativeInfinity)
@@ -395,12 +416,12 @@ js_math_max(JSContext *cx, unsigned argc, Value *vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     double x;
-    double maxval = MOZ_DOUBLE_NEGATIVE_INFINITY();
+    double maxval = NegativeInfinity();
     for (unsigned i = 0; i < args.length(); i++) {
         if (!ToNumber(cx, args[i], &x))
             return false;
         // Math.max(num, NaN) => NaN, Math.max(-0, +0) => +0
-        if (x > maxval || MOZ_DOUBLE_IS_NaN(x) || (x == maxval && MOZ_DOUBLE_IS_NEGATIVE(maxval)))
+        if (x > maxval || IsNaN(x) || (x == maxval && IsNegative(maxval)))
             maxval = x;
     }
     args.rval().setNumber(maxval);
@@ -413,12 +434,12 @@ js_math_min(JSContext *cx, unsigned argc, Value *vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     double x;
-    double minval = MOZ_DOUBLE_POSITIVE_INFINITY();
+    double minval = PositiveInfinity();
     for (unsigned i = 0; i < args.length(); i++) {
         if (!ToNumber(cx, args[i], &x))
             return false;
         // Math.min(num, NaN) => NaN, Math.min(-0, +0) => -0
-        if (x < minval || MOZ_DOUBLE_IS_NaN(x) || (x == minval && MOZ_DOUBLE_IS_NEGATIVE_ZERO(x)))
+        if (x < minval || IsNaN(x) || (x == minval && IsNegativeZero(x)))
             minval = x;
     }
     args.rval().setNumber(minval);
@@ -446,7 +467,7 @@ js::powi(double x, int y)
                 // given us a finite p. This happens very rarely.
 
                 double result = 1.0 / p;
-                return (result == 0 && MOZ_DOUBLE_IS_INFINITE(p))
+                return (result == 0 && IsInfinite(p))
                        ? pow(x, static_cast<double>(y))  // Avoid pow(double, int).
                        : result;
             }
@@ -478,7 +499,7 @@ js::ecmaPow(double x, double y)
      * Because C99 and ECMA specify different behavior for pow(),
      * we need to wrap the libm call to make it ECMA compliant.
      */
-    if (!MOZ_DOUBLE_IS_FINITE(y) && (x == 1.0 || x == -1.0))
+    if (!IsFinite(y) && (x == 1.0 || x == -1.0))
         return js_NaN;
     /* pow(x, +-0) is always 1, even for x = NaN (MSVC gets this wrong). */
     if (y == 0)
@@ -508,7 +529,7 @@ js_math_pow(JSContext *cx, unsigned argc, Value *vp)
      * Special case for square roots. Note that pow(x, 0.5) != sqrt(x)
      * when x = -0.0, so we have to guard for this.
      */
-    if (MOZ_DOUBLE_IS_FINITE(x) && x != 0.0) {
+    if (IsFinite(x) && x != 0.0) {
         if (y == 0.5) {
             vp->setNumber(sqrt(x));
             return JS_TRUE;
@@ -533,6 +554,42 @@ js_math_pow(JSContext *cx, unsigned argc, Value *vp)
 # pragma optimize("", on)
 #endif
 
+static uint64_t
+random_generateSeed()
+{
+    union {
+        uint8_t     u8[8];
+        uint32_t    u32[2];
+        uint64_t    u64;
+    } seed;
+    seed.u64 = 0;
+
+#if defined(XP_WIN)
+    /*
+     * Our PRNG only uses 48 bits, so calling rand_s() twice to get 64 bits is
+     * probably overkill.
+     */
+    rand_s(&seed.u32[0]);
+#elif defined(XP_UNIX)
+    /*
+     * In the unlikely event we can't read /dev/urandom, there's not much we can
+     * do, so just mix in the fd error code and the current time.
+     */
+    int fd = open("/dev/urandom", O_RDONLY);
+    MOZ_ASSERT(fd >= 0, "Can't open /dev/urandom");
+    if (fd >= 0) {
+        read(fd, seed.u8, mozilla::ArrayLength(seed.u8));
+        close(fd);
+    }
+    seed.u32[0] ^= fd;
+#else
+# error "Platform needs to implement random_generateSeed()"
+#endif
+
+    seed.u32[1] ^= PRMJ_Now();
+    return seed.u64;
+}
+
 static const uint64_t RNG_MULTIPLIER = 0x5DEECE66DLL;
 static const uint64_t RNG_ADDEND = 0xBLL;
 static const uint64_t RNG_MASK = (1LL << 48) - 1;
@@ -541,28 +598,25 @@ static const double RNG_DSCALE = double(1LL << 53);
 /*
  * Math.random() support, lifted from java.util.Random.java.
  */
-extern void
-random_setSeed(uint64_t *rngState, uint64_t seed)
+static void
+random_initState(uint64_t *rngState)
 {
+    /* Our PRNG only uses 48 bits, so squeeze our entropy into those bits. */
+    uint64_t seed = random_generateSeed();
+    seed ^= (seed >> 16);
     *rngState = (seed ^ RNG_MULTIPLIER) & RNG_MASK;
 }
 
-void
-js::InitRandom(JSRuntime *rt, uint64_t *rngState)
-{
-    /*
-     * Set the seed from current time. Since we have a RNG per compartment and
-     * we often bring up several compartments at the same time, mix in a
-     * different integer each time. This is only meant to prevent all the new
-     * compartments from getting the same sequence of pseudo-random
-     * numbers. There's no security guarantee.
-     */
-    random_setSeed(rngState, (uint64_t(PRMJ_Now()) << 8) ^ rt->nextRNGNonce());
-}
-
-extern uint64_t
+uint64_t
 random_next(uint64_t *rngState, int bits)
 {
+    MOZ_ASSERT((*rngState & 0xffff000000000000ULL) == 0, "Bad rngState");
+    MOZ_ASSERT(bits > 0 && bits <= 48, "bits is out of range");
+
+    if (*rngState == 0) {
+        random_initState(rngState);
+    }
+
     uint64_t nextstate = *rngState * RNG_MULTIPLIER;
     nextstate += RNG_ADDEND;
     nextstate &= RNG_MASK;
@@ -607,13 +661,13 @@ js_math_round(JSContext *cx, unsigned argc, Value *vp)
         return false;
 
     int32_t i;
-    if (MOZ_DOUBLE_IS_INT32(x, &i)) {
+    if (DoubleIsInt32(x, &i)) {
         args.rval().setInt32(i);
         return true;
     }
 
-    /* Some numbers are so big that adding 0.5 would give the wrong number */
-    if (MOZ_DOUBLE_EXPONENT(x) >= 52) {
+    /* Some numbers are so big that adding 0.5 would give the wrong number. */
+    if (ExponentComponent(x) >= 52) {
         args.rval().setNumber(x);
         return true;
     }

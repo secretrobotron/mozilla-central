@@ -451,6 +451,11 @@ nsTransitionManager::StyleContextChanged(dom::Element *aElement,
                       aNewStyleContext->HasPseudoElementData(),
                   "pseudo type mismatch");
 
+  if (!mPresContext->IsDynamic()) {
+    // For print or print preview, ignore transitions.
+    return nullptr;
+  }
+
   // NOTE: Things in this function (and ConsiderStartingTransition)
   // should never call PeekStyleData because we don't preserve gotten
   // structs across reframes.
@@ -498,7 +503,7 @@ nsTransitionManager::StyleContextChanged(dom::Element *aElement,
     return nullptr;
   }
 
-  NS_WARN_IF_FALSE(!CommonAnimationManager::ThrottlingEnabled() ||
+  NS_WARN_IF_FALSE(!nsLayoutUtils::AreAsyncAnimationsEnabled() ||
                      mPresContext->ThrottledStyleIsUpToDate(),
                    "throttled animations not up to date");
 
@@ -893,6 +898,11 @@ nsTransitionManager::WalkTransitionRule(ElementDependentRuleProcessorData* aData
     return;
   }
 
+  if (!mPresContext->IsDynamic()) {
+    // For print or print preview, ignore animations.
+    return;
+  }
+
   if (aData->mPresContext->IsProcessingRestyles() &&
       !aData->mPresContext->IsProcessingAnimationStyleChange()) {
     // If we're processing a normal style change rather than one from
@@ -902,12 +912,10 @@ nsTransitionManager::WalkTransitionRule(ElementDependentRuleProcessorData* aData
 
     // We need to immediately restyle with animation
     // after doing this.
-    if (et) {
-      nsRestyleHint hint =
-        aPseudoType == nsCSSPseudoElements::ePseudo_NotPseudoElement ?
-        eRestyle_Self : eRestyle_Subtree;
-      mPresContext->PresShell()->RestyleForAnimation(aData->mElement, hint);
-    }
+    nsRestyleHint hint =
+      aPseudoType == nsCSSPseudoElements::ePseudo_NotPseudoElement ?
+      eRestyle_Self : eRestyle_Subtree;
+    mPresContext->PresShell()->RestyleForAnimation(aData->mElement, hint);
     return;
   }
 

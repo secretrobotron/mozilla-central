@@ -19,13 +19,13 @@
 #include "jscpucfg.h"
 #include "jsversion.h"
 #include "jsgc.h"
-#include "jsinterp.h"
 #include "jsnum.h"
 #include "jsobj.h"
 
 #include "gc/Barrier.h"
 #include "gc/Marking.h"
 #include "vm/GlobalObject.h"
+#include "vm/Interpreter.h"
 #include "vm/NumericConversions.h"
 
 #include "jsatominlines.h"
@@ -45,6 +45,7 @@ using namespace js;
 using namespace js::gc;
 using namespace js::types;
 
+using mozilla::IsNaN;
 using mozilla::PodCopy;
 
 /*
@@ -67,7 +68,7 @@ ValueIsLength(const Value &v, uint32_t *len)
 
     if (v.isDouble()) {
         double d = v.toDouble();
-        if (MOZ_DOUBLE_IS_NaN(d))
+        if (IsNaN(d))
             return false;
 
         uint32_t length = uint32_t(d);
@@ -199,21 +200,40 @@ ArrayBufferObject::class_constructor(JSContext *cx, unsigned argc, Value *vp)
 
 /*
  * Note that some callers are allowed to pass in a NULL cx, so we allocate with
- * the cx if available and fall back to the runtime.
+ * the cx if available and fall back to the runtime.  If oldptr is given,
+ * it's expected to be a previously-allocated ObjectElements* pointer that we
+ * then realloc.
  */
 static ObjectElements *
-AllocateArrayBufferContents(JSContext *maybecx, uint32_t nbytes, uint8_t *contents)
+AllocateArrayBufferContents(JSContext *maybecx, uint32_t nbytes, uint8_t *initdata, void *oldptr = NULL)
 {
     uint32_t size = nbytes + sizeof(ObjectElements);
-    ObjectElements *newheader =
-        static_cast<ObjectElements *>(maybecx ? maybecx->calloc_(size) : js_calloc(size));
+    ObjectElements *newheader;
+
+    // if oldptr is given, then we need to do a realloc
+    if (oldptr) {
+        ObjectElements *oldheader = static_cast<ObjectElements *>(oldptr);
+        uint32_t oldnbytes = ArrayBufferObject::getElementsHeaderInitializedLength(oldheader);
+        newheader = static_cast<ObjectElements *>(maybecx ? maybecx->realloc_(oldptr, size) : js_realloc(oldptr, size));
+
+        // if we grew the array, we need to set the new bytes to 0
+        if (newheader && nbytes > oldnbytes)
+            memset(reinterpret_cast<uint8_t*>(newheader->elements()) + oldnbytes, 0, nbytes - oldnbytes);
+    } else {
+        newheader = static_cast<ObjectElements *>(maybecx ? maybecx->calloc_(size) : js_calloc(size));
+    }
     if (!newheader) {
         if (maybecx)
             js_ReportOutOfMemory(maybecx);
         return NULL;
     }
-    if (contents)
-        memcpy(newheader->elements(), contents, nbytes);
+
+    if (initdata)
+        memcpy(newheader->elements(), initdata, nbytes);
+
+    // we rely on this being correct
+    ArrayBufferObject::setElementsHeader(newheader, nbytes);
+
     return newheader;
 }
 
@@ -539,7 +559,7 @@ ArrayBufferObject::create(JSContext *cx, uint32_t nbytes, uint8_t *contents)
     JS_ASSERT(obj->getClass() == &ArrayBufferClass);
 
     js::Shape *empty = EmptyShape::getInitialShape(cx, &ArrayBufferClass,
-                                                   obj->getProto(), obj->getParent(),
+                                                   obj->getProto(), obj->getParent(), obj->getMetadata(),
                                                    gc::FINALIZE_OBJECT16_BACKGROUND);
     if (!empty)
         return NULL;
@@ -1718,6 +1738,8 @@ class TypedArrayTemplate
                                 ? UseNewTypeForInitializer(cx, script, pc, fastClass())
                                 : GenericObject;
         RootedObject obj(cx, NewBuiltinClassInstance(cx, fastClass(), newKind));
+        if (!obj)
+            return NULL;
 
         if (script) {
             if (!types::SetInitializerObjectType(cx, script, pc, obj, newKind))
@@ -1763,7 +1785,7 @@ class TypedArrayTemplate
         // would just boil down to a slightly slower wrapper around the
         // following code anyway:
         js::Shape *empty = EmptyShape::getInitialShape(cx, fastClass(),
-                                                       obj->getProto(), obj->getParent(),
+                                                       obj->getProto(), obj->getParent(), obj->getMetadata(),
                                                        gc::FINALIZE_OBJECT8_BACKGROUND,
                                                        BaseShape::NOT_EXTENSIBLE);
         if (!empty)
@@ -2267,7 +2289,7 @@ class TypedArrayTemplate
     static NativeType
     nativeFromDouble(double d)
     {
-        if (!ArrayTypeIsFloatingPoint() && JS_UNLIKELY(MOZ_DOUBLE_IS_NaN(d)))
+        if (!ArrayTypeIsFloatingPoint() && JS_UNLIKELY(IsNaN(d)))
             return NativeType(int32_t(0));
         if (TypeIsFloatingPoint<NativeType>())
             return NativeType(d);
@@ -3351,7 +3373,7 @@ const JSFunctionSpec ArrayBufferObject::jsfuncs[] = {
  * TypedArray boilerplate
  */
 
-#ifdef ENABLE_TYPEDARRAY_MOVE
+#ifndef RELEASE_BUILD
 # define IMPL_TYPED_ARRAY_STATICS(_typedArray)                                 \
 const JSFunctionSpec _typedArray::jsfuncs[] = {                                \
     JS_FN("iterator", JS_ArrayIterator, 0, 0),                                 \
@@ -3919,6 +3941,20 @@ JS_PUBLIC_API(JSBool)
 JS_AllocateArrayBufferContents(JSContext *cx, uint32_t nbytes, void **contents, uint8_t **data)
 {
     js::ObjectElements *header = AllocateArrayBufferContents(cx, nbytes, NULL);
+    if (!header)
+        return false;
+
+    ArrayBufferObject::setElementsHeader(header, nbytes);
+
+    *contents = header;
+    *data = reinterpret_cast<uint8_t*>(header->elements());
+    return true;
+}
+
+JS_PUBLIC_API(JSBool)
+JS_ReallocateArrayBufferContents(JSContext *cx, uint32_t nbytes, void **contents, uint8_t **data)
+{
+    js::ObjectElements *header = AllocateArrayBufferContents(cx, nbytes, NULL, *contents);
     if (!header)
         return false;
 

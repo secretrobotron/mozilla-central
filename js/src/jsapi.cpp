@@ -36,7 +36,6 @@
 #include "jsexn.h"
 #include "jsfun.h"
 #include "jsgc.h"
-#include "jsinterp.h"
 #include "jsiter.h"
 #include "jslock.h"
 #include "jsmath.h"
@@ -67,6 +66,7 @@
 #include "ion/AsmJS.h"
 #include "js/CharacterEncoding.h"
 #include "vm/Debugger.h"
+#include "vm/Interpreter.h"
 #include "vm/NumericConversions.h"
 #include "vm/Shape.h"
 #include "vm/StringBuffer.h"
@@ -75,10 +75,10 @@
 
 #include "jsatominlines.h"
 #include "jsinferinlines.h"
-#include "jsinterpinlines.h"
 #include "jsobjinlines.h"
 #include "jsscriptinlines.h"
 
+#include "vm/Interpreter-inl.h"
 #include "vm/ObjectImpl-inl.h"
 #include "vm/RegExpObject-inl.h"
 #include "vm/RegExpStatics-inl.h"
@@ -87,10 +87,9 @@
 
 #if ENABLE_YARR_JIT
 #include "assembler/jit/ExecutableAllocator.h"
-#include "methodjit/Logging.h"
 #endif
 
-#ifdef JS_METHODJIT
+#ifdef JS_ION
 #include "ion/Ion.h"
 #endif
 
@@ -502,7 +501,7 @@ JS_ValueToNumber(JSContext *cx, jsval valueArg, double *dp)
 JS_PUBLIC_API(JSBool)
 JS_DoubleIsInt32(double d, int32_t *ip)
 {
-    return MOZ_DOUBLE_IS_INT32(d, ip);
+    return mozilla::DoubleIsInt32(d, ip);
 }
 
 JS_PUBLIC_API(int32_t)
@@ -566,7 +565,7 @@ JS_ValueToInt32(JSContext *cx, jsval vArg, int32_t *ip)
         return false;
     }
 
-    if (MOZ_DOUBLE_IS_NaN(d) || d <= -2147483649.0 || 2147483648.0 <= d) {
+    if (mozilla::IsNaN(d) || d <= -2147483649.0 || 2147483648.0 <= d) {
         js_ReportValueError(cx, JSMSG_CANT_CONVERT,
                             JSDVG_SEARCH_STACK, v, NullPtr());
         return false;
@@ -692,7 +691,7 @@ static const JSSecurityCallbacks NullSecurityCallbacks = { };
 static bool
 JitSupportsFloatingPoint()
 {
-#if defined(JS_METHODJIT) || defined(JS_ION)
+#if defined(JS_ION)
     if (!JSC::MacroAssembler().supportsFloatingPoint())
         return false;
 
@@ -739,9 +738,6 @@ JSRuntime::JSRuntime(JSUseHelperThreads useHelperThreads)
     freeLifoAlloc(TEMP_LIFO_ALLOC_PRIMARY_CHUNK_SIZE),
     execAlloc_(NULL),
     bumpAlloc_(NULL),
-#ifdef JS_METHODJIT
-    jaegerRuntime_(NULL),
-#endif
     ionRuntime_(NULL),
     selfHostingGlobal_(NULL),
     nativeStackBase(0),
@@ -897,11 +893,10 @@ JSRuntime::JSRuntime(JSUseHelperThreads useHelperThreads)
     parallelWarmup(0),
     ionReturnOverride_(MagicValue(JS_ARG_POISON)),
     useHelperThreads_(useHelperThreads),
-    requestedHelperThreadCount(-1),
+    requestedHelperThreadCount(-1)
 #ifdef DEBUG
-    enteredPolicy(NULL),
+    , enteredPolicy(NULL)
 #endif
-    rngNonce(0)
 {
     /* Initialize infallibly first, so we can goto bad and JS_DestroyRuntime. */
     JS_INIT_CLIST(&onNewGlobalObjectWatchers);
@@ -926,10 +921,6 @@ JSRuntime::init(uint32_t maxbytes)
 #endif
 
     js::TlsPerThreadData.set(&mainThread);
-
-#ifdef JS_METHODJIT_SPEW
-    JMCheckLogging();
-#endif
 
     if (!js_InitGC(this, maxbytes))
         return false;
@@ -1050,13 +1041,10 @@ JSRuntime::~JSRuntime()
 
     js_delete(bumpAlloc_);
     js_delete(mathCache_);
-#ifdef JS_METHODJIT
-    js_delete(jaegerRuntime_);
-#endif
 #ifdef JS_ION
     js_delete(ionRuntime_);
 #endif
-    js_delete(execAlloc_);  /* Delete after jaegerRuntime_. */
+    js_delete(execAlloc_);  /* Delete after ionRuntime_. */
 
     if (ionPcScriptCache)
         js_delete(ionPcScriptCache);
@@ -1166,7 +1154,7 @@ JS_NewRuntime(uint32_t maxbytes, JSUseHelperThreads useHelperThreads)
     if (!rt)
         return NULL;
 
-#if defined(JS_METHODJIT) && defined(JS_ION)
+#if defined(JS_ION)
     if (!ion::InitializeIon())
         return NULL;
 #endif
@@ -1775,12 +1763,6 @@ JS_RefreshCrossCompartmentWrappers(JSContext *cx, JSObject *objArg)
     return RemapAllWrappersForObject(cx, obj, obj);
 }
 
-JS_PUBLIC_API(JSObject *)
-JS_GetGlobalObject(JSContext *cx)
-{
-    return cx->maybeDefaultCompartmentObject();
-}
-
 JS_PUBLIC_API(void)
 JS_SetGlobalObject(JSContext *cx, JSObject *obj)
 {
@@ -2243,6 +2225,14 @@ JS_GetFunctionPrototype(JSContext *cx, JSObject *forObj)
 }
 
 JS_PUBLIC_API(JSObject *)
+JS_GetArrayPrototype(JSContext *cx, JSObject *forObj)
+{
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, forObj);
+    return forObj->global().getOrCreateArrayPrototype(cx);
+}
+
+JS_PUBLIC_API(JSObject *)
 JS_GetGlobalForObject(JSContext *cx, JSObject *obj)
 {
     AssertHeapIsIdle(cx);
@@ -2477,43 +2467,47 @@ JS_SetExtraGCRootsTracer(JSRuntime *rt, JSTraceDataOp traceOp, void *data)
 }
 
 JS_PUBLIC_API(void)
-JS_CallValueTracer(JSTracer *trc, Value valueArg, const char *name)
+JS_CallValueTracer(JSTracer *trc, Value *valuep, const char *name)
 {
-    Value value = valueArg;
-    MarkValueUnbarriered(trc, &value, name);
-    JS_ASSERT(value == valueArg);
+    MarkValueUnbarriered(trc, valuep, name);
 }
 
 JS_PUBLIC_API(void)
-JS_CallIdTracer(JSTracer *trc, jsid idArg, const char *name)
+JS_CallIdTracer(JSTracer *trc, jsid *idp, const char *name)
 {
-    jsid id = idArg;
-    MarkIdUnbarriered(trc, &id, name);
-    JS_ASSERT(id == idArg);
+    MarkIdUnbarriered(trc, idp, name);
 }
 
 JS_PUBLIC_API(void)
-JS_CallObjectTracer(JSTracer *trc, JSObject *objArg, const char *name)
+JS_CallObjectTracer(JSTracer *trc, JSObject **objp, const char *name)
 {
-    JSObject *obj = objArg;
+    MarkObjectUnbarriered(trc, objp, name);
+}
+
+JS_PUBLIC_API(void)
+JS_CallMaskedObjectTracer(JSTracer *trc, uintptr_t *objp, uintptr_t flagMask, const char *name)
+{
+    uintptr_t flags = *objp & flagMask;
+    JSObject *obj = reinterpret_cast<JSObject *>(*objp & ~flagMask);
+    if (!obj)
+        return;
+
+    JS_SET_TRACING_LOCATION(trc, (void*)objp);
     MarkObjectUnbarriered(trc, &obj, name);
-    JS_ASSERT(obj == objArg);
+
+    *objp = uintptr_t(obj) | flags;
 }
 
 JS_PUBLIC_API(void)
-JS_CallStringTracer(JSTracer *trc, JSString *strArg, const char *name)
+JS_CallStringTracer(JSTracer *trc, JSString **strp, const char *name)
 {
-    JSString *str = strArg;
-    MarkStringUnbarriered(trc, &str, name);
-    JS_ASSERT(str == strArg);
+    MarkStringUnbarriered(trc, strp, name);
 }
 
 JS_PUBLIC_API(void)
-JS_CallScriptTracer(JSTracer *trc, JSScript *scriptArg, const char *name)
+JS_CallScriptTracer(JSTracer *trc, JSScript **scriptp, const char *name)
 {
-    JSScript *script = scriptArg;
-    MarkScriptUnbarriered(trc, &script, name);
-    JS_ASSERT(script == scriptArg);
+    MarkScriptUnbarriered(trc, scriptp, name);
 }
 
 JS_PUBLIC_API(void)
@@ -2524,6 +2518,36 @@ JS_CallGenericTracer(JSTracer *trc, void *gcthingArg, const char *name)
     JS_SET_TRACING_NAME(trc, name);
     MarkKind(trc, &gcthing, kind);
     JS_ASSERT(gcthing == gcthingArg);
+}
+
+JS_PUBLIC_API(void)
+JS_CallHeapValueTracer(JSTracer *trc, JS::Heap<JS::Value> *valuep, const char *name)
+{
+    MarkValueUnbarriered(trc, valuep->unsafeGet(), name);
+}
+
+JS_PUBLIC_API(void)
+JS_CallHeapIdTracer(JSTracer *trc, JS::Heap<jsid> *idp, const char *name)
+{
+    MarkIdUnbarriered(trc, idp->unsafeGet(), name);
+}
+
+JS_PUBLIC_API(void)
+JS_CallHeapObjectTracer(JSTracer *trc, JS::Heap<JSObject *> *objp, const char *name)
+{
+    MarkObjectUnbarriered(trc, objp->unsafeGet(), name);
+}
+
+JS_PUBLIC_API(void)
+JS_CallHeapStringTracer(JSTracer *trc, JS::Heap<JSString *> *strp, const char *name)
+{
+    MarkStringUnbarriered(trc, strp->unsafeGet(), name);
+}
+
+JS_PUBLIC_API(void)
+JS_CallHeapScriptTracer(JSTracer *trc, JS::Heap<JSScript *> *scriptp, const char *name)
+{
+    MarkScriptUnbarriered(trc, scriptp->unsafeGet(), name);
 }
 
 JS_PUBLIC_API(void)
@@ -2570,6 +2594,10 @@ JS_GetTraceThingInfo(char *buf, size_t bufsize, JSTracer *trc, void *thing,
 
       case JSTRACE_SCRIPT:
         name = "script";
+        break;
+
+      case JSTRACE_LAZY_SCRIPT:
+        name = "lazyscript";
         break;
 
       case JSTRACE_IONCODE:
@@ -2643,6 +2671,7 @@ JS_GetTraceThingInfo(char *buf, size_t bufsize, JSTracer *trc, void *thing,
             break;
           }
 
+          case JSTRACE_LAZY_SCRIPT:
           case JSTRACE_IONCODE:
           case JSTRACE_SHAPE:
           case JSTRACE_BASE_SHAPE:
@@ -4894,6 +4923,11 @@ JS_CloneFunctionObject(JSContext *cx, JSObject *funobjArg, JSObject *parentArg)
      * script, we cannot clone it without breaking the compiler's assumptions.
      */
     RootedFunction fun(cx, funobj->toFunction());
+    if (fun->isInterpretedLazy()) {
+        AutoCompartment ac(cx, funobj);
+        if (!fun->getOrCreateScript(cx))
+            return NULL;
+    }
     if (fun->isInterpreted() && (fun->nonLazyScript()->enclosingStaticScope() ||
         (fun->nonLazyScript()->compileAndGo && !parent->isGlobal())))
     {
@@ -5257,11 +5291,13 @@ JS::CompileOptions::CompileOptions(JSContext *cx)
       utf8(false),
       filename(NULL),
       lineno(1),
+      column(0),
+      element(NullPtr()),
       compileAndGo(cx->hasOption(JSOPTION_COMPILE_N_GO)),
       forEval(false),
       noScriptRval(cx->hasOption(JSOPTION_NO_SCRIPT_RVAL)),
       selfHostingMode(false),
-      userBit(false),
+      canLazilyParse(true),
       sourcePolicy(SAVE_SOURCE)
 {
 }
@@ -5400,7 +5436,7 @@ JS_BufferIsCompilableUnit(JSContext *cx, JSObject *objArg, const char *utf8, siz
         CompileOptions options(cx);
         options.setCompileAndGo(false);
         Parser<frontend::FullParseHandler> parser(cx, options, chars, length,
-                                                  /* foldConstants = */ true);
+                                                  /* foldConstants = */ true, NULL, NULL);
         if (parser.init()) {
             older = JS_SetErrorReporter(cx, NULL);
             if (!parser.parse(obj) &&
@@ -6329,17 +6365,13 @@ JS_Stringify(JSContext *cx, jsval *vp, JSObject *replacerArg, jsval space,
 }
 
 JS_PUBLIC_API(JSBool)
-JS_ParseJSON(JSContext *cx, const jschar *chars, uint32_t len, jsval *vp)
+JS_ParseJSON(JSContext *cx, const jschar *chars, uint32_t len, JS::MutableHandleValue vp)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
 
     RootedValue reviver(cx, NullValue()), value(cx);
-    if (!ParseJSONWithReviver(cx, JS::StableCharPtr(chars, len), len, reviver, &value))
-        return false;
-
-    *vp = value;
-    return true;
+    return ParseJSONWithReviver(cx, JS::StableCharPtr(chars, len), len, reviver, vp);
 }
 
 JS_PUBLIC_API(JSBool)

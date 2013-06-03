@@ -44,8 +44,6 @@ protected:
   // nsSVGElement overrides
   virtual StringAttributesInfo GetStringInfo() MOZ_OVERRIDE;
 
-  virtual bool IsEventName(nsIAtom* aName);
-
   enum { HREF };
   nsSVGString mStringAttributes[1];
   static StringInfo sStringInfo[1];

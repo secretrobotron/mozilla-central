@@ -13,7 +13,7 @@ namespace mozilla {
 
 class CameraPreviewFrameCallback {
 public:
-  virtual void OnNewFrame(const gfxIntSize& aIntrinsicSize, layers::Image* aImage);
+  virtual void OnNewFrame(const gfxIntSize& aIntrinsicSize, layers::Image* aImage) = 0;
 };
 
 /**
@@ -29,7 +29,8 @@ class CameraPreviewMediaStream : public MediaStream {
 public:
   CameraPreviewMediaStream(DOMMediaStream* aWrapper) :
     MediaStream(aWrapper),
-    mMutex("mozilla::camera::CameraPreviewMediaStream")
+    mMutex("mozilla::camera::CameraPreviewMediaStream"),
+    mFrameCallback(nullptr)
   {
     mIsConsumed = false;
   }

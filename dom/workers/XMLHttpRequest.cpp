@@ -15,6 +15,7 @@
 
 #include "jsfriendapi.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsJSUtils.h"
 #include "nsThreadUtils.h"
 #include "nsXMLHttpRequest.h"
@@ -665,6 +666,8 @@ public:
     }
 
     XMLHttpRequest::StateData state;
+    // XXXbz there is no AutoValueRooter anymore?
+    JS::AutoArrayRooter rooter(aCx, 1, &state.mResponse);
 
     state.mResponseTextResult = mResponseTextResult;
     state.mResponseText = mResponseText;
@@ -719,23 +722,23 @@ public:
       return true;
     }
 
-    JSString* type = JS_NewUCStringCopyN(aCx, mType.get(), mType.Length());
+    JS::Rooted<JSString*> type(aCx, JS_NewUCStringCopyN(aCx, mType.get(), mType.Length()));
     if (!type) {
       return false;
     }
 
-    JSObject* event = mProgressEvent ?
+    JS::Rooted<JSObject*> event(aCx, mProgressEvent ?
                       events::CreateProgressEvent(aCx, type, mLengthComputable,
                                                   mLoaded, mTotal) :
                       events::CreateGenericEvent(aCx, type, false, false,
-                                                 false);
+                                                 false));
     if (!event) {
       return false;
     }
 
-    JSObject* target = mUploadEvent ?
+    JS::Rooted<JSObject*> target(aCx, mUploadEvent ?
                        xhr->GetUploadObjectNoCreate()->GetJSObject() :
-                       xhr->GetJSObject();
+                       xhr->GetJSObject());
     MOZ_ASSERT(target);
 
     bool dummy;
@@ -1421,9 +1424,9 @@ void
 XMLHttpRequest::_trace(JSTracer* aTrc)
 {
   if (mUpload) {
-    JS_CallObjectTracer(aTrc, mUpload->GetJSObject(), "mUpload");
+    mUpload->TraceJSObject(aTrc, "mUpload");
   }
-  JS_CallValueTracer(aTrc, mStateData.mResponse, "mResponse");
+  JS_CallValueTracer(aTrc, &mStateData.mResponse, "mResponse");
   XMLHttpRequestEventTarget::_trace(aTrc);
 }
 
@@ -1533,7 +1536,7 @@ XMLHttpRequest::MaybeDispatchPrematureAbortEvents(ErrorResult& aRv)
   if (mProxy->mSeenUploadLoadStart) {
     MOZ_ASSERT(mUpload);
 
-    JSObject* target = mUpload->GetJSObject();
+    JS::Rooted<JSObject*> target(GetJSContext(), mUpload->GetJSObject());
     MOZ_ASSERT(target);
 
     DispatchPrematureAbortEvent(target, STRING_abort, true, aRv);
@@ -1550,7 +1553,7 @@ XMLHttpRequest::MaybeDispatchPrematureAbortEvents(ErrorResult& aRv)
   }
 
   if (mProxy->mSeenLoadStart) {
-    JSObject* target = GetJSObject();
+    JS::Rooted<JSObject*> target(GetJSContext(), GetJSObject());
     MOZ_ASSERT(target);
 
     DispatchPrematureAbortEvent(target, STRING_readystatechange, false, aRv);
@@ -1573,7 +1576,7 @@ XMLHttpRequest::MaybeDispatchPrematureAbortEvents(ErrorResult& aRv)
 }
 
 void
-XMLHttpRequest::DispatchPrematureAbortEvent(JSObject* aTarget,
+XMLHttpRequest::DispatchPrematureAbortEvent(JS::Handle<JSObject*> aTarget,
                                             uint8_t aEventType,
                                             bool aUploadTarget,
                                             ErrorResult& aRv)
@@ -1589,13 +1592,13 @@ XMLHttpRequest::DispatchPrematureAbortEvent(JSObject* aTarget,
 
   JSContext* cx = GetJSContext();
 
-  JSString* type = JS_NewStringCopyZ(cx, sEventStrings[aEventType]);
+  JS::Rooted<JSString*> type(cx, JS_NewStringCopyZ(cx, sEventStrings[aEventType]));
   if (!type) {
     aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
     return;
   }
 
-  JSObject* event;
+  JS::Rooted<JSObject*> event(cx);
   if (aEventType == STRING_readystatechange) {
     event = events::CreateGenericEvent(cx, type, false, false, false);
   }

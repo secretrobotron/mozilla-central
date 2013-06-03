@@ -10,12 +10,12 @@
 #include "jscntxt.h"
 #include "jscompartment.h"
 #include "jsfriendapi.h"
-#include "jsinterp.h"
 #include "jsprobes.h"
 #include "jsgc.h"
 
 #include "builtin/Object.h" // For js::obj_construct
 #include "frontend/ParseMaps.h"
+#include "vm/Interpreter.h"
 #include "vm/RegExpObject.h"
 
 #include "jsgcinlines.h"
@@ -27,6 +27,15 @@ NewObjectCache::staticAsserts()
 {
     JS_STATIC_ASSERT(NewObjectCache::MAX_OBJ_SIZE == sizeof(JSObject_Slots16));
     JS_STATIC_ASSERT(gc::FINALIZE_OBJECT_LAST == gc::FINALIZE_OBJECT16_BACKGROUND);
+}
+
+inline void
+NewObjectCache::clearNurseryObjects(JSRuntime *rt)
+{
+    for (unsigned i = 0; i < mozilla::ArrayLength(entries); ++i) {
+        if (IsInsideNursery(rt, entries[i].key))
+            mozilla::PodZero(&entries[i]);
+    }
 }
 
 inline bool
@@ -101,6 +110,9 @@ NewObjectCache::fillType(EntryIndex entry, Class *clasp, js::types::TypeObject *
 inline JSObject *
 NewObjectCache::newObjectFromHit(JSContext *cx, EntryIndex entry_, js::gc::InitialHeap heap)
 {
+    // The new object cache does not account for metadata attached via callbacks.
+    JS_ASSERT(!cx->compartment->objectMetadataCallback);
+
     JS_ASSERT(unsigned(entry_) < mozilla::ArrayLength(entries));
     Entry *entry = &entries[entry_];
 

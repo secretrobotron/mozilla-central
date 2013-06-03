@@ -513,11 +513,11 @@ var gPluginHandler = {
     // only show notification for small subset of plugins
     let mimetype = pluginInfo.mimetype.split(";")[0];
     if (!this.canInstallThisMimeType(mimetype))
-      return;
+      return false;
 
     let pluginIdentifier = this.nameForSupportedPlugin(mimetype);
     if (!pluginIdentifier)
-      return;
+      return false;
 
     let displayName = this.supportedPlugins.plugins[pluginIdentifier].displayName;
 
@@ -935,7 +935,7 @@ var gPluginHandler = {
       return;
 
     if (eventType == "PluginBlocklisted") {
-      if (gPrefService.getBoolPref("plugins.hide_infobar_for_missing_plugin")) // XXX add a new pref?
+      if (gPrefService.getBoolPref("plugins.hide_infobar_for_blocked_plugin"))
         return;
 
       if (blockedNotification)

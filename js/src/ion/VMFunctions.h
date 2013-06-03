@@ -303,6 +303,7 @@ template <> struct OutParamToDataType<Value *> { static const DataType result = 
 template <> struct OutParamToDataType<int *> { static const DataType result = Type_Int32; };
 template <> struct OutParamToDataType<uint32_t *> { static const DataType result = Type_Int32; };
 template <> struct OutParamToDataType<MutableHandleValue> { static const DataType result = Type_Handle; };
+template <> struct OutParamToDataType<MutableHandleObject> { static const DataType result = Type_Handle; };
 
 template <class> struct MatchContext { };
 template <> struct MatchContext<JSContext *> {
@@ -509,12 +510,13 @@ bool CharCodeAt(JSContext *cx, HandleString str, int32_t index, uint32_t *code);
 JSFlatString *StringFromCharCode(JSContext *cx, int32_t code);
 
 bool SetProperty(JSContext *cx, HandleObject obj, HandlePropertyName name, HandleValue value,
-                 bool strict, bool isSetName);
+                 bool strict, int jsop);
 
 bool InterruptCheck(JSContext *cx);
 
 HeapSlot *NewSlots(JSRuntime *rt, unsigned nslots);
-JSObject *NewCallObject(JSContext *cx, HandleShape shape, HandleTypeObject type, HeapSlot *slots);
+JSObject *NewCallObject(JSContext *cx, HandleScript script,
+                        HandleShape shape, HandleTypeObject type, HeapSlot *slots);
 JSObject *NewStringObject(JSContext *cx, HandleString str);
 
 bool SPSEnter(JSContext *cx, HandleScript script);
@@ -531,6 +533,10 @@ void GetDynamicName(JSContext *cx, JSObject *scopeChain, JSString *str, Value *v
 
 JSBool FilterArguments(JSContext *cx, JSString *str);
 
+#ifdef JSGC_GENERATIONAL
+void PostWriteBarrier(JSRuntime *rt, JSObject *obj);
+#endif
+
 uint32_t GetIndexFromString(JSString *str);
 
 bool DebugPrologue(JSContext *cx, BaselineFrame *frame, JSBool *mustReturn);
@@ -540,6 +546,9 @@ bool StrictEvalPrologue(JSContext *cx, BaselineFrame *frame);
 bool HeavyweightFunPrologue(JSContext *cx, BaselineFrame *frame);
 
 bool NewArgumentsObject(JSContext *cx, BaselineFrame *frame, MutableHandleValue res);
+
+JSObject *InitRestParameter(JSContext *cx, uint32_t length, Value *rest, HandleObject templateObj,
+                            HandleObject res);
 
 bool HandleDebugTrap(JSContext *cx, BaselineFrame *frame, uint8_t *retAddr, JSBool *mustReturn);
 bool OnDebuggerStatement(JSContext *cx, BaselineFrame *frame, jsbytecode *pc, JSBool *mustReturn);

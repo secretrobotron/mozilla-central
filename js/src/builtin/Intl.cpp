@@ -14,12 +14,12 @@
 #include "jsapi.h"
 #include "jsatom.h"
 #include "jscntxt.h"
-#include "jsinterp.h"
 #include "jsobj.h"
 
 #include "builtin/Intl.h"
 #include "vm/DateTime.h"
 #include "vm/GlobalObject.h"
+#include "vm/Interpreter.h"
 #include "vm/Stack.h"
 #include "vm/StringBuffer.h"
 
@@ -39,6 +39,9 @@
 #include "jsobjinlines.h"
 
 using namespace js;
+
+using mozilla::IsFinite;
+using mozilla::IsNegativeZero;
 
 #if ENABLE_INTL_API
 using icu::Locale;
@@ -1273,7 +1276,7 @@ js::intl_numberingSystem(JSContext *cx, unsigned argc, Value *vp)
         return false;
     }
     const char *name = numbers->getName();
-    JSString *jsname = JS_NewStringCopyZ(cx, name);
+    RootedString jsname(cx, JS_NewStringCopyZ(cx, name));
     delete numbers;
     if (!jsname)
         return false;
@@ -1429,7 +1432,7 @@ static bool
 intl_FormatNumber(JSContext *cx, UNumberFormat *nf, double x, MutableHandleValue result)
 {
     // FormatNumber doesn't consider -0.0 to be negative.
-    if (MOZ_DOUBLE_IS_NEGATIVE_ZERO(x))
+    if (IsNegativeZero(x))
         x = 0.0;
 
     StringBuffer chars(cx);
@@ -1908,7 +1911,7 @@ NewUDateFormat(JSContext *cx, HandleObject dateTimeFormat)
 static bool
 intl_FormatDateTime(JSContext *cx, UDateFormat *df, double x, MutableHandleValue result)
 {
-    if (!MOZ_DOUBLE_IS_FINITE(x)) {
+    if (!IsFinite(x)) {
         JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_DATE_NOT_FINITE);
         return false;
     }

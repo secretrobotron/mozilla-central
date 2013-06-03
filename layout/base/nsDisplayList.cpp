@@ -217,17 +217,17 @@ static void AddTransformFunctions(nsCSSValueList* aList,
         matrix._11 = array->Item(1).GetFloatValue();
         matrix._12 = array->Item(2).GetFloatValue();
         matrix._13 = 0;
-        matrix._14 = array->Item(3).GetFloatValue();
-        matrix._21 = array->Item(4).GetFloatValue();
-        matrix._22 = array->Item(5).GetFloatValue();
+        matrix._14 = 0;
+        matrix._21 = array->Item(3).GetFloatValue();
+        matrix._22 = array->Item(4).GetFloatValue();
         matrix._23 = 0;
-        matrix._24 = array->Item(6).GetFloatValue();
+        matrix._24 = 0;
         matrix._31 = 0;
         matrix._32 = 0;
         matrix._33 = 1;
         matrix._34 = 0;
-        matrix._41 = 0;
-        matrix._42 = 0;
+        matrix._41 = array->Item(5).GetFloatValue();
+        matrix._42 = array->Item(6).GetFloatValue();
         matrix._43 = 0;
         matrix._44 = 1;
         aFunctions.AppendElement(TransformMatrix(matrix));
@@ -618,7 +618,6 @@ static void RecordFrameMetrics(nsIFrame* aForFrame,
                                bool aMayHaveTouchListeners) {
   nsPresContext* presContext = aForFrame->PresContext();
   int32_t auPerDevPixel = presContext->AppUnitsPerDevPixel();
-  float auPerCSSPixel = nsPresContext::AppUnitsPerCSSPixel();
 
   nsIntRect visible = aVisibleRect.ScaleToNearestPixels(
     aContainerParameters.mXScale, aContainerParameters.mYScale, auPerDevPixel);
@@ -664,9 +663,7 @@ static void RecordFrameMetrics(nsIFrame* aForFrame,
     metrics.mContentRect = contentBounds.ScaleToNearestPixels(
       aContainerParameters.mXScale, aContainerParameters.mYScale, auPerDevPixel);
     nsPoint scrollPosition = scrollableFrame->GetScrollPosition();
-    metrics.mScrollOffset = mozilla::gfx::Point(
-      NSAppUnitsToDoublePixels(scrollPosition.x, auPerCSSPixel),
-      NSAppUnitsToDoublePixels(scrollPosition.y, auPerCSSPixel));
+    metrics.mScrollOffset = CSSPoint::FromAppUnits(scrollPosition);
   }
   else {
     nsRect contentBounds = aForFrame->GetRect();
@@ -687,13 +684,16 @@ static void RecordFrameMetrics(nsIFrame* aForFrame,
   }
   metrics.mResolution = gfxSize(presShell->GetXResolution(), presShell->GetYResolution());
 
-  metrics.mDevPixelsPerCSSPixel = auPerCSSPixel / auPerDevPixel;
+  metrics.mDevPixelsPerCSSPixel =
+    (float)nsPresContext::AppUnitsPerCSSPixel() / auPerDevPixel;
 
   metrics.mMayHaveTouchListeners = aMayHaveTouchListeners;
 
   if (nsIWidget* widget = aForFrame->GetNearestWidget()) {
     widget->GetBounds(metrics.mCompositionBounds);
   }
+
+  metrics.mPresShellId = presShell->GetPresShellId();
 
   aRoot->SetFrameMetrics(metrics);
 }
@@ -1144,7 +1144,7 @@ void nsDisplayList::PaintForFrame(nsDisplayListBuilder* aBuilder,
     BuildContainerLayerFor(aBuilder, layerManager, aForFrame, nullptr, *this,
                            containerParameters, nullptr);
 
-  if (widgetTransaction && !(aFlags & PAINT_NO_CLEAR_INVALIDATIONS)) {
+  if (widgetTransaction) {
     aForFrame->ClearInvalidationStateBits();
   }
 
@@ -1559,6 +1559,7 @@ nsDisplayBackgroundImage::nsDisplayBackgroundImage(nsDisplayListBuilder* aBuilde
   , mLayer(aLayer)
   , mIsThemed(aIsThemed)
   , mIsBottommostLayer(true)
+  , mIsAnimated(false)
 {
   MOZ_COUNT_CTOR(nsDisplayBackgroundImage);
 
@@ -1567,7 +1568,8 @@ nsDisplayBackgroundImage::nsDisplayBackgroundImage(nsDisplayListBuilder* aBuilde
     mFrame->IsThemed(disp, &mThemeTransparency);
     // Perform necessary RegisterThemeGeometry
     if (disp->mAppearance == NS_THEME_MOZ_MAC_UNIFIED_TOOLBAR ||
-        disp->mAppearance == NS_THEME_TOOLBAR) {
+        disp->mAppearance == NS_THEME_TOOLBAR ||
+        disp->mAppearance == NS_THEME_WINDOW_TITLEBAR) {
       RegisterThemeGeometry(aBuilder, aFrame);
     } else if (disp->mAppearance == NS_THEME_WIN_BORDERLESS_GLASS ||
                disp->mAppearance == NS_THEME_WIN_GLASS) {
@@ -1606,6 +1608,29 @@ nsDisplayBackgroundImage::WriteDebugInfo(FILE *aOutput)
 }
 #endif
 
+static nsStyleContext* GetBackgroundStyleContext(nsIFrame* aFrame)
+{
+  nsStyleContext *sc;
+  if (!nsCSSRendering::FindBackground(aFrame, &sc)) {
+    // We don't want to bail out if moz-appearance is set on a root
+    // node. If it has a parent content node, bail because it's not
+    // a root, other wise keep going in order to let the theme stuff
+    // draw the background. The canvas really should be drawing the
+    // bg, but there's no way to hook that up via css.
+    if (!aFrame->StyleDisplay()->mAppearance) {
+      return nullptr;
+    }
+
+    nsIContent* content = aFrame->GetContent();
+    if (!content || content->GetParent()) {
+      return nullptr;
+    }
+
+    sc = aFrame->StyleContext();
+  }
+  return sc;
+}
+
 /*static*/ nsresult
 nsDisplayBackgroundImage::AppendBackgroundItemsToTop(nsDisplayListBuilder* aBuilder,
                                                      nsIFrame* aFrame,
@@ -1616,8 +1641,11 @@ nsDisplayBackgroundImage::AppendBackgroundItemsToTop(nsDisplayListBuilder* aBuil
   const nsStyleBackground* bg = nullptr;
   nsPresContext* presContext = aFrame->PresContext();
   bool isThemed = aFrame->IsThemed();
-  if (!isThemed && nsCSSRendering::FindBackground(aFrame, &bgSC)) {
-    bg = bgSC->StyleBackground();
+  if (!isThemed) {
+    bgSC = GetBackgroundStyleContext(aFrame);
+    if (bgSC) {
+      bg = bgSC->StyleBackground();
+    }
   }
 
   bool drawBackgroundColor = false;
@@ -1793,6 +1821,7 @@ nsDisplayBackgroundImage::TryOptimizeToImageLayer(LayerManager* aManager,
   int32_t appUnitsPerDevPixel = presContext->AppUnitsPerDevPixel();
   mDestRect = nsLayoutUtils::RectToGfxRect(state.mDestArea, appUnitsPerDevPixel);
   mImageContainer = imageContainer;
+  mIsAnimated = imageRenderer->IsAnimatedImage();
 
   // Ok, we can turn this into a layer if needed.
   return true;
@@ -1816,31 +1845,36 @@ nsDisplayBackgroundImage::GetLayerState(nsDisplayListBuilder* aBuilder,
                                         LayerManager* aManager,
                                         const FrameLayerBuilder::ContainerParameters& aParameters)
 {
-  if (!aManager->IsCompositingCheap() ||
-      !nsLayoutUtils::GPUImageScalingEnabled() ||
-      !TryOptimizeToImageLayer(aManager, aBuilder)) {
-    return LAYER_NONE;
+  if (!TryOptimizeToImageLayer(aManager, aBuilder) ||
+      !nsLayoutUtils::AnimatedImageLayersEnabled() ||
+      !mIsAnimated) {
+    if (!aManager->IsCompositingCheap() ||
+        !nsLayoutUtils::GPUImageScalingEnabled()) {
+      return LAYER_NONE;
+    }
   }
 
-  gfxSize imageSize = mImageContainer->GetCurrentSize();
-  NS_ASSERTION(imageSize.width != 0 && imageSize.height != 0, "Invalid image size!");
+  if (!mIsAnimated) {
+    gfxSize imageSize = mImageContainer->GetCurrentSize();
+    NS_ASSERTION(imageSize.width != 0 && imageSize.height != 0, "Invalid image size!");
 
-  gfxRect destRect = mDestRect;
+    gfxRect destRect = mDestRect;
 
-  destRect.width *= aParameters.mXScale;
-  destRect.height *= aParameters.mYScale;
+    destRect.width *= aParameters.mXScale;
+    destRect.height *= aParameters.mYScale;
 
-  // Calculate the scaling factor for the frame.
-  gfxSize scale = gfxSize(destRect.width / imageSize.width, destRect.height / imageSize.height);
+    // Calculate the scaling factor for the frame.
+    gfxSize scale = gfxSize(destRect.width / imageSize.width, destRect.height / imageSize.height);
 
-  // If we are not scaling at all, no point in separating this into a layer.
-  if (scale.width == 1.0f && scale.height == 1.0f) {
-    return LAYER_NONE;
-  }
+    // If we are not scaling at all, no point in separating this into a layer.
+    if (scale.width == 1.0f && scale.height == 1.0f) {
+      return LAYER_NONE;
+    }
 
-  // If the target size is pretty small, no point in using a layer.
-  if (destRect.width * destRect.height < 64 * 64) {
-    return LAYER_NONE;
+    // If the target size is pretty small, no point in using a layer.
+    if (destRect.width * destRect.height < 64 * 64) {
+      return LAYER_NONE;
+    }
   }
 
   return LAYER_ACTIVE;
@@ -1851,7 +1885,13 @@ nsDisplayBackgroundImage::BuildLayer(nsDisplayListBuilder* aBuilder,
                                      LayerManager* aManager,
                                      const ContainerParameters& aParameters)
 {
-  nsRefPtr<ImageLayer> layer = aManager->CreateImageLayer();
+  nsRefPtr<ImageLayer> layer = static_cast<ImageLayer*>
+    (aManager->GetLayerBuilder()->GetLeafLayerFor(aBuilder, this));
+  if (!layer) {
+    layer = aManager->CreateImageLayer();
+    if (!layer)
+      return nullptr;
+  }
   layer->SetContainer(mImageContainer);
   ConfigureLayer(layer, aParameters.mOffset);
   return layer.forget();

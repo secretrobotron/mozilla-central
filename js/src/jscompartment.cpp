@@ -42,6 +42,7 @@ JSCompartment::JSCompartment(Zone *zone)
     lastCodeRelease(0),
     analysisLifoAlloc(ANALYSIS_LIFO_ALLOC_PRIMARY_CHUNK_SIZE),
     data(NULL),
+    objectMetadataCallback(NULL),
     lastAnimationTime(0),
     regExps(rt),
     propertyTree(thisForCtor()),
@@ -97,9 +98,6 @@ JSCompartment::init(JSContext *cx)
 
     if (!regExps.init(cx))
         return false;
-
-    if (cx)
-        InitRandom(cx->runtime, &rngState);
 
     enumerators = NativeIterator::allocateSentinel(cx);
     if (!enumerators)
@@ -660,16 +658,8 @@ JSCompartment::updateForDebugMode(FreeOp *fop, AutoDebugModeGC &dmgc)
             acx->updateJITEnabled();
     }
 
-#ifdef JS_METHODJIT
-    bool enabled = debugMode();
-
-    JS_ASSERT_IF(enabled, !hasScriptsOnStack());
-
-    for (gc::CellIter i(zone(), gc::FINALIZE_SCRIPT); !i.done(); i.next()) {
-        JSScript *script = i.get<JSScript>();
-        if (script->compartment() == this)
-            script->debugMode = enabled;
-    }
+#ifdef JS_ION
+    JS_ASSERT_IF(debugMode(), !hasScriptsOnStack());
 
     // When we change a compartment's debug mode, whether we're turning it
     // on or off, we must always throw away all analyses: debug mode

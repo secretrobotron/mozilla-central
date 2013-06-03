@@ -95,6 +95,7 @@ using namespace mozilla::widget;
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsAutoPtr.h"
 #include "BasicLayers.h"
+#include "ClientLayerManager.h"
 
 extern "C" {
 #define PIXMAN_DONT_DEFINE_STDINT
@@ -121,6 +122,7 @@ extern "C" {
 
 using namespace mozilla;
 using namespace mozilla::widget;
+using namespace mozilla::layers;
 using mozilla::gl::GLContext;
 using mozilla::layers::LayerManagerOGL;
 
@@ -1950,7 +1952,7 @@ gdk_window_flash(GdkWindow *    aGdkWindow,
                          &x,
                          &y);
 
-  gc = gdk_gc_new(GDK_ROOT_PARENT());
+  gc = gdk_gc_new(gdk_get_default_root_window());
 
   white.pixel = WhitePixel(gdk_display,DefaultScreen(gdk_display));
 
@@ -1967,7 +1969,7 @@ gdk_window_flash(GdkWindow *    aGdkWindow,
    */
   for (i = 0; i < aTimes * 2; i++)
   {
-    gdk_draw_rectangle(GDK_ROOT_PARENT(),
+    gdk_draw_rectangle(gdk_get_default_root_window(),
                        gc,
                        TRUE,
                        x,
@@ -2122,7 +2124,8 @@ nsWindow::OnExposeEvent(cairo_t *cr)
         return TRUE;
     }
     // If this widget uses OMTC...
-    if (GetLayerManager()->AsShadowForwarder() && GetLayerManager()->AsShadowForwarder()->HasShadowManager()) {
+    if (GetLayerManager()->AsShadowForwarder() && GetLayerManager()->AsShadowForwarder()->HasShadowManager() &&
+        Compositor::GetBackend() != LAYERS_BASIC) {
         listener->DidPaintWindow();
 
         g_free(rects);
@@ -2132,7 +2135,7 @@ nsWindow::OnExposeEvent(cairo_t *cr)
         LayerManagerOGL *manager = static_cast<LayerManagerOGL*>(GetLayerManager());
         manager->SetClippingRegion(region);
 
-        listener->PaintWindow(this, region, 0);
+        listener->PaintWindow(this, region);
         listener->DidPaintWindow();
 
         g_free(rects);
@@ -2194,8 +2197,14 @@ nsWindow::OnExposeEvent(cairo_t *cr)
 
     bool painted = false;
     {
-      AutoLayerManagerSetup setupLayerManager(this, ctx, layerBuffering);
-      painted = listener->PaintWindow(this, region, 0);
+      if (GetLayerManager()->GetBackendType() == LAYERS_BASIC) {
+        AutoLayerManagerSetup setupLayerManager(this, ctx, layerBuffering);
+        painted = listener->PaintWindow(this, region);
+      } else if (GetLayerManager()->GetBackendType() == LAYERS_CLIENT) {
+        ClientLayerManager *manager = static_cast<ClientLayerManager*>(GetLayerManager());
+        manager->SetShadowTarget(ctx);
+        painted = listener->PaintWindow(this, region);
+      }
     }
 
 #ifdef MOZ_X11

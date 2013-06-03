@@ -674,11 +674,12 @@ TelemetryPing.prototype = {
     }
   },
 
+  submissionPath: function submissionPath() {
+    return "/submit/telemetry/" + this._uuid;
+  },
+
   doPing: function doPing(server, ping, onSuccess, onError) {
-    let submitPath = "/submit/telemetry/" + (ping.reason == "test-ping"
-                                             ? "test-ping"
-                                             : ping.slug);
-    let url = server + submitPath;
+    let url = server + this.submissionPath();
     let request = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"]
                   .createInstance(Ci.nsIXMLHttpRequest);
     request.mozBackgroundRequest = true;
@@ -788,7 +789,7 @@ TelemetryPing.prototype = {
       Telemetry.canRecord = false;
       return;
     }
-    Services.obs.addObserver(this, "profile-before-change", false);
+    Services.obs.addObserver(this, "profile-before-change2", false);
     Services.obs.addObserver(this, "sessionstore-windows-restored", false);
     Services.obs.addObserver(this, "quit-application-granted", false);
 #ifdef MOZ_WIDGET_ANDROID
@@ -996,7 +997,7 @@ TelemetryPing.prototype = {
       Services.obs.removeObserver(this, "xul-window-visible");
       this._hasXulWindowVisibleObserver = false;
     }
-    Services.obs.removeObserver(this, "profile-before-change");
+    Services.obs.removeObserver(this, "profile-before-change2");
     Services.obs.removeObserver(this, "quit-application-granted");
 #ifdef MOZ_WIDGET_ANDROID
     Services.obs.removeObserver(this, "application-background", false);
@@ -1061,9 +1062,6 @@ TelemetryPing.prototype = {
       this.setup();
       this.cacheProfileDirectory();
       break;
-    case "profile-before-change":
-      this.uninstall();
-      break;
     case "cycle-collector-begin":
       let now = new Date();
       if (!gLastMemoryPoll
@@ -1103,7 +1101,8 @@ TelemetryPing.prototype = {
     case "idle":
       this.sendIdlePing(false, this._server);
       break;
-    case "quit-application-granted":
+    case "profile-before-change2":
+      this.uninstall();
       if (Telemetry.canSend) {
         this.savePendingPings();
       }

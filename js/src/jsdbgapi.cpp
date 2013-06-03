@@ -17,7 +17,6 @@
 #include "jscntxt.h"
 #include "jsfun.h"
 #include "jsgc.h"
-#include "jsinterp.h"
 #include "jsobj.h"
 #include "jsopcode.h"
 #include "jsscript.h"
@@ -27,6 +26,7 @@
 
 #include "frontend/BytecodeEmitter.h"
 #include "vm/Debugger.h"
+#include "vm/Interpreter.h"
 #include "vm/Shape.h"
 
 #ifdef JS_ASMJS
@@ -36,9 +36,9 @@
 #include "jsatominlines.h"
 #include "jsinferinlines.h"
 #include "jsobjinlines.h"
-#include "jsinterpinlines.h"
 #include "jsscriptinlines.h"
 
+#include "vm/Interpreter-inl.h"
 #include "vm/Stack-inl.h"
 
 using namespace js;
@@ -597,18 +597,6 @@ JS_PUBLIC_API(JSVersion)
 JS_GetScriptVersion(JSContext *cx, JSScript *script)
 {
     return VersionNumber(script->getVersion());
-}
-
-JS_PUBLIC_API(bool)
-JS_GetScriptUserBit(JSScript *script)
-{
-    return script->userBit;
-}
-
-JS_PUBLIC_API(void)
-JS_SetScriptUserBit(JSScript *script, bool b)
-{
-    script->userBit = b;
 }
 
 JS_PUBLIC_API(bool)
@@ -1370,20 +1358,20 @@ JSBrokenFrameIterator::JSBrokenFrameIterator(JSContext *cx)
 
 JSBrokenFrameIterator::~JSBrokenFrameIterator()
 {
-    js_free((StackIter::Data *)data_);
+    js_free((ScriptFrameIter::Data *)data_);
 }
 
 bool
 JSBrokenFrameIterator::done() const
 {
-    NonBuiltinScriptFrameIter iter(*(StackIter::Data *)data_);
+    NonBuiltinScriptFrameIter iter(*(ScriptFrameIter::Data *)data_);
     return iter.done();
 }
 
 JSBrokenFrameIterator &
 JSBrokenFrameIterator::operator++()
 {
-    StackIter::Data *data = (StackIter::Data *)data_;
+    ScriptFrameIter::Data *data = (ScriptFrameIter::Data *)data_;
     NonBuiltinScriptFrameIter iter(*data);
     ++iter;
     *data = iter.data_;
@@ -1393,20 +1381,20 @@ JSBrokenFrameIterator::operator++()
 JSAbstractFramePtr
 JSBrokenFrameIterator::abstractFramePtr() const
 {
-    NonBuiltinScriptFrameIter iter(*(StackIter::Data *)data_);
+    NonBuiltinScriptFrameIter iter(*(ScriptFrameIter::Data *)data_);
     return Jsvalify(iter.abstractFramePtr());
 }
 
 jsbytecode *
 JSBrokenFrameIterator::pc() const
 {
-    NonBuiltinScriptFrameIter iter(*(StackIter::Data *)data_);
+    NonBuiltinScriptFrameIter iter(*(ScriptFrameIter::Data *)data_);
     return iter.pc();
 }
 
 bool
 JSBrokenFrameIterator::isConstructing() const
 {
-    NonBuiltinScriptFrameIter iter(*(StackIter::Data *)data_);
+    NonBuiltinScriptFrameIter iter(*(ScriptFrameIter::Data *)data_);
     return iter.isConstructing();
 }

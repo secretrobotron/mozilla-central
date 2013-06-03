@@ -92,8 +92,8 @@ typedef nsEventStatus (* EVENT_CALLBACK)(nsGUIEvent *event);
 #endif
 
 #define NS_IWIDGET_IID \
-{ 0x16da2e50, 0x0fee, 0x4719, \
-  { 0x93, 0x37, 0xce, 0xd4, 0xdd, 0xd2, 0x22, 0x53 } }
+{ 0x5b9152, 0x56c8, 0x4a2d, \
+  { 0x94, 0x9e, 0xec, 0xf5, 0x3, 0x83, 0x3d, 0x48 } }
 
 /*
  * Window shadow styles
@@ -305,6 +305,11 @@ struct IMEState {
 
 struct InputContext {
   InputContext() : mNativeIMEContext(nullptr) {}
+
+  bool IsPasswordEditor() const
+  {
+    return mHTMLInputType.LowerCaseEqualsLiteral("password");
+  }
 
   IMEState mIMEState;
 
@@ -1169,6 +1174,8 @@ class nsIWidget : public nsISupports {
      */
     virtual void CleanupWindowEffects() = 0;
 
+    virtual void PreRender(LayerManager* aManager) = 0;
+
     /**
      * Called before the LayerManager draws the layer tree.
      *
@@ -1307,24 +1314,6 @@ class nsIWidget : public nsISupports {
      * included, including those not targeted at this nsIwidget instance.
      */
     virtual bool HasPendingInputEvent() = 0;
-
-    /**
-     * Called when when we need to begin secure keyboard input, such as when a password field
-     * gets focus.
-     *
-     * NOTE: Calls to this method may not be nested and you can only enable secure keyboard input
-     * for one widget at a time.
-     */
-    NS_IMETHOD BeginSecureKeyboardInput() = 0;
-
-    /**
-     * Called when when we need to end secure keyboard input, such as when a password field
-     * loses focus.
-     *
-     * NOTE: Calls to this method may not be nested and you can only enable secure keyboard input
-     * for one widget at a time.
-     */
-    NS_IMETHOD EndSecureKeyboardInput() = 0;
 
     /**
      * Set the background color of the window titlebar for this widget. On Mac,
@@ -1655,13 +1644,6 @@ class nsIWidget : public nsISupports {
        NS_ENSURE_SUCCESS(rv, false);
        return !bounds.IsEmpty();
     }
-
-    /**
-     * This function is called by nsViewManager right before the retained layer 
-     * tree for this widget is about to be updated, and any required
-     * ThebesLayer painting occurs.
-     */
-    virtual void WillPaint() { }
 
     /**
      * Get the natural bounds of this widget.  This method is only

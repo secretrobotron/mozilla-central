@@ -32,7 +32,8 @@ public class WebAppImpl extends GeckoApp {
     private URL mOrigin;
     private TextView mTitlebarText = null;
     private View mTitlebar = null;
-    private View mSplashscreen = null;
+
+    private View mSplashscreen;
 
     protected int getIndex() { return 0; }
 
@@ -46,6 +47,8 @@ public class WebAppImpl extends GeckoApp {
     public void onCreate(Bundle savedInstanceState)
     {
         super.onCreate(savedInstanceState);
+
+        mSplashscreen = (RelativeLayout) findViewById(R.id.splashscreen);
         if (!GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning)) {
             overridePendingTransition(R.anim.grow_fade_in_center, android.R.anim.fade_out);
             showSplash();
@@ -79,7 +82,7 @@ public class WebAppImpl extends GeckoApp {
     }
 
     @Override
-    protected void initializeChrome(String uri, boolean isExternalURL) {
+    protected void loadStartupTab(String uri) {
         String action = getIntent().getAction();
         if (GeckoApp.ACTION_WEBAPP_PREFIX.equals(action)) {
             // This action assumes the uri is not an installed WebApp. We will
@@ -90,13 +93,9 @@ public class WebAppImpl extends GeckoApp {
             startActivity(appIntent);
             finish();
         }
-
-        super.initializeChrome(uri, isExternalURL);
     }
 
     private void showSplash() {
-        mSplashscreen = (RelativeLayout) findViewById(R.id.splashscreen);
-
         SharedPreferences prefs = getSharedPreferences("webapps", Context.MODE_PRIVATE | Context.MODE_MULTI_PROCESS);
 
         // get the favicon dominant color, stored when the app was installed
@@ -159,22 +158,35 @@ public class WebAppImpl extends GeckoApp {
             case SELECTED:
             case LOCATION_CHANGE:
                 if (Tabs.getInstance().isSelectedTab(tab)) {
-                    try {
-                        String title = tab.getURL();
-                        URL page = new URL(title);
-                        mTitlebarText.setText(page.getProtocol() + "://" + page.getHost());
+                    final String urlString = tab.getURL();
+                    final URL url;
 
-                        if (mOrigin != null && mOrigin.getHost().equals(page.getHost()))
-                            mTitlebar.setVisibility(View.GONE);
-                        else
-                            mTitlebar.setVisibility(View.VISIBLE);
+                    try {
+                        url = new URL(urlString);
                     } catch (java.net.MalformedURLException ex) {
-                        Log.e(LOGTAG, "Unable to parse url: ", ex);
+                        mTitlebarText.setText(urlString);
+
+                        // If we can't parse the url, and its an app protocol hide
+                        // the titlebar and return, otherwise show the titlebar
+                        // and the full url
+                        if (!urlString.startsWith("app://")) {
+                            mTitlebar.setVisibility(View.VISIBLE);
+                        } else {
+                            mTitlebar.setVisibility(View.GONE);
+                        }
+                        return;
+                    }
+
+                    if (mOrigin != null && mOrigin.getHost().equals(url.getHost())) {
+                        mTitlebar.setVisibility(View.GONE);
+                    } else {
+                        mTitlebarText.setText(url.getProtocol() + "://" + url.getHost());
+                        mTitlebar.setVisibility(View.VISIBLE);
                     }
                 }
                 break;
             case LOADED:
-                if (mSplashscreen.getVisibility() == View.VISIBLE) {
+                if (mSplashscreen != null && mSplashscreen.getVisibility() == View.VISIBLE) {
                     Animation fadeout = AnimationUtils.loadAnimation(this, android.R.anim.fade_out);
                     fadeout.setAnimationListener(new Animation.AnimationListener() {
                         @Override
@@ -190,7 +202,7 @@ public class WebAppImpl extends GeckoApp {
                 }
                 break;
             case START:
-                if (mSplashscreen.getVisibility() == View.VISIBLE) {
+                if (mSplashscreen != null && mSplashscreen.getVisibility() == View.VISIBLE) {
                     View area = findViewById(R.id.splashscreen_progress);
                     area.setVisibility(View.VISIBLE);
                     Animation fadein = AnimationUtils.loadAnimation(this, android.R.anim.fade_in);
@@ -203,8 +215,8 @@ public class WebAppImpl extends GeckoApp {
     }
 
     @Override
-    protected void connectGeckoLayerClient() {
-        super.connectGeckoLayerClient();
+    protected void geckoConnected() {
+        super.geckoConnected();
         getLayerView().setOverScrollMode(View.OVER_SCROLL_NEVER);
     }
 };

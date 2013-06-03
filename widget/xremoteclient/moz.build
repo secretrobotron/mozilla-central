@@ -6,3 +6,8 @@
 
 MODULE = 'xremoteclient'
 
+PROGRAM = 'mozilla-xremote-client'
+
+CPP_SOURCES += [
+    '$(filter-out $(LIBCPPSRCS),$(PROGCPPSRCS)) $(LIBCPPSRCS)',
+]

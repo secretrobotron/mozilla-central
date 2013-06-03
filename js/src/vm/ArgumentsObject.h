@@ -123,7 +123,7 @@ class ArgumentsObject : public JSObject
      * This allows function-local analysis to determine that formals are
      * not aliased and generally simplifies arguments objects.
      */
-    static ArgumentsObject *createUnexpected(JSContext *cx, StackIter &iter);
+    static ArgumentsObject *createUnexpected(JSContext *cx, ScriptFrameIter &iter);
     static ArgumentsObject *createUnexpected(JSContext *cx, AbstractFramePtr frame);
 #if defined(JS_ION)
     static ArgumentsObject *createForIon(JSContext *cx, ion::IonJSFrameLayout *frame,
@@ -177,7 +177,7 @@ class ArgumentsObject : public JSObject
      *    needed, the frontend should have emitted JSOP_GETALIASEDVAR.
      */
     inline const Value &element(uint32_t i) const;
-    inline void setElement(uint32_t i, const Value &v);
+    inline void setElement(JSContext *cx, uint32_t i, const Value &v);
     inline const Value &arg(unsigned i) const;
     inline void setArg(unsigned i, const Value &v);
 

@@ -16,7 +16,6 @@
 #include "jswrapper.h"
 
 #include "builtin/TestingFunctions.h"
-#include "methodjit/MethodJIT.h"
 #include "vm/ForkJoin.h"
 
 #include "vm/Stack-inl.h"
@@ -168,14 +167,6 @@ GetBuildConfiguration(JSContext *cx, unsigned argc, jsval *vp)
     value = BooleanValue(false);
 #endif
     if (!JS_SetProperty(cx, info, "oom-backtraces", &value))
-        return false;
-
-#ifdef JS_METHODJIT
-    value = BooleanValue(true);
-#else
-    value = BooleanValue(false);
-#endif
-    if (!JS_SetProperty(cx, info, "methodjit", &value))
         return false;
 
 #ifdef ENABLE_PARALLEL_JS
@@ -715,7 +706,7 @@ CountHeap(JSContext *cx, unsigned argc, jsval *vp)
     if (startValue.isUndefined()) {
         JS_TraceRuntime(&countTracer.base);
     } else {
-        JS_CallValueTracer(&countTracer.base, startValue, "root");
+        JS_CallValueTracer(&countTracer.base, startValue.address(), "root");
     }
 
     counter = 0;
@@ -739,6 +730,29 @@ CountHeap(JSContext *cx, unsigned argc, jsval *vp)
     *vp = JS_NumberValue((double) counter);
     return true;
 }
+
+#ifdef DEBUG
+static JSBool
+OOMAfterAllocations(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (args.length() != 1) {
+        JS_ReportError(cx, "count argument required");
+        return false;
+    }
+
+    int32_t count;
+    if (!JS_ValueToInt32(cx, args[0], &count))
+        return false;
+    if (count <= 0) {
+        JS_ReportError(cx, "count argument must be positive");
+        return false;
+    }
+
+    OOM_maxAllocations = OOM_counter + count;
+    return true;
+}
+#endif
 
 static unsigned finalizeCount = 0;
 
@@ -816,45 +830,6 @@ DumpHeapComplete(JSContext *cx, unsigned argc, jsval *vp)
     return true;
 }
 
-JSBool
-MJitChunkLimit(JSContext *cx, unsigned argc, jsval *vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-
-    if (argc != 1) {
-        RootedObject callee(cx, &args.callee());
-        ReportUsageError(cx, callee, "Wrong number of arguments");
-        return JS_FALSE;
-    }
-
-    if (cx->runtime->alwaysPreserveCode) {
-        JS_ReportError(cx, "Can't change chunk limit after gcPreserveCode()");
-        return JS_FALSE;
-    }
-
-    for (CompartmentsIter c(cx->runtime); !c.done(); c.next()) {
-        if (c->lastAnimationTime != 0) {
-            JS_ReportError(cx, "Can't change chunk limit if code may be preserved");
-            return JS_FALSE;
-        }
-    }
-
-    double t;
-    if (!JS_ValueToNumber(cx, args[0], &t))
-        return JS_FALSE;
-
-#ifdef JS_METHODJIT
-    mjit::SetChunkLimit((uint32_t) t);
-#endif
-
-    // Clear out analysis information which might refer to code compiled with
-    // the previous chunk limit.
-    JS_GC(cx->runtime);
-
-    vp->setUndefined();
-    return true;
-}
-
 static JSBool
 Terminate(JSContext *cx, unsigned arg, jsval *vp)
 {
@@ -917,6 +892,74 @@ js::testingFunc_inParallelSection(JSContext *cx, unsigned argc, jsval *vp)
     return true;
 }
 
+static JSObject *objectMetadataFunction = NULL;
+
+static JSObject *
+ShellObjectMetadataCallback(JSContext *cx)
+{
+    Value thisv = UndefinedValue();
+
+    Value rval;
+    if (!Invoke(cx, thisv, ObjectValue(*objectMetadataFunction), 0, NULL, &rval)) {
+        cx->clearPendingException();
+        return NULL;
+    }
+
+    return rval.isObject() ? &rval.toObject() : NULL;
+}
+
+static JSBool
+SetObjectMetadataCallback(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    args.rval().setUndefined();
+
+    if (argc == 0 || !args[0].isObject() || !args[0].toObject().isFunction()) {
+        if (objectMetadataFunction)
+            JS_RemoveObjectRoot(cx, &objectMetadataFunction);
+        objectMetadataFunction = NULL;
+        js::SetObjectMetadataCallback(cx, NULL);
+        return true;
+    }
+
+    if (!objectMetadataFunction && !JS_AddObjectRoot(cx, &objectMetadataFunction))
+        return false;
+
+    objectMetadataFunction = &args[0].toObject();
+    js::SetObjectMetadataCallback(cx, ShellObjectMetadataCallback);
+    return true;
+}
+
+static JSBool
+SetObjectMetadata(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (argc != 2 || !args[0].isObject() || !args[1].isObject()) {
+        JS_ReportError(cx, "Both arguments must be objects");
+        return false;
+    }
+
+    args.rval().setUndefined();
+
+    RootedObject obj(cx, &args[0].toObject());
+    RootedObject metadata(cx, &args[1].toObject());
+    return SetObjectMetadata(cx, obj, metadata);
+}
+
+static JSBool
+GetObjectMetadata(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (argc != 1 || !args[0].isObject()) {
+        JS_ReportError(cx, "Argument must be an object");
+        return false;
+    }
+
+    args.rval().setObjectOrNull(GetObjectMetadata(&args[0].toObject()));
+    return true;
+}
+
 #ifndef JS_ION
 JSBool
 js::IsAsmJSCompilationAvailable(JSContext *cx, unsigned argc, Value *vp)
@@ -966,6 +1009,13 @@ static JSFunctionSpecWithHelp TestingFunctions[] = {
 "  start when it is given and is not null. kind is either 'all' (default) to\n"
 "  count all things or one of 'object', 'double', 'string', 'function'\n"
 "  to count only things of that kind."),
+
+#ifdef DEBUG
+    JS_FN_HELP("oomAfterAllocations", OOMAfterAllocations, 1, 0,
+"oomAfterAllocations(count)",
+"  After 'count' js_malloc memory allocations, fail every following allocation\n"
+"  (return NULL)."),
+#endif
 
     JS_FN_HELP("makeFinalizeObserver", MakeFinalizeObserver, 0, 0,
 "makeFinalizeObserver()",
@@ -1056,10 +1106,6 @@ static JSFunctionSpecWithHelp TestingFunctions[] = {
 "dumpHeapComplete([filename])",
 "  Dump reachable and unreachable objects to a file."),
 
-    JS_FN_HELP("mjitChunkLimit", MJitChunkLimit, 1, 0,
-"mjitChunkLimit(N)",
-"  Specify limit on compiled chunk size during mjit compilation."),
-
     JS_FN_HELP("terminate", Terminate, 0, 0,
 "terminate()",
 "  Terminate JavaScript execution, as if we had run out of\n"
@@ -1093,13 +1139,25 @@ static JSFunctionSpecWithHelp TestingFunctions[] = {
 "  validated according to the asm.js spec."),
 
     JS_FN_HELP("isAsmJSFunction", IsAsmJSFunction, 1, 0,
-"isAsmJSModule(fn)",
+"isAsmJSFunction(fn)",
 "  Returns whether the given value is a nested function in an asm.js module that has been\n"
 "  both compile- and link-time validated."),
 
     JS_FN_HELP("inParallelSection", testingFunc_inParallelSection, 0, 0,
 "inParallelSection()",
 "  True if this code is executing within a parallel section."),
+
+    JS_FN_HELP("setObjectMetadataCallback", SetObjectMetadataCallback, 1, 0,
+"setObjectMetadataCallback(fn)",
+"  Specify function to supply metadata for all newly created objects."),
+
+    JS_FN_HELP("setObjectMetadata", SetObjectMetadata, 2, 0,
+"setObjectMetadata(obj, metadataObj)",
+"  Change the metadata for an object."),
+
+    JS_FN_HELP("getObjectMetadata", GetObjectMetadata, 1, 0,
+"getObjectMetadata(obj)",
+"  Get the metadata for an object."),
 
     JS_FS_HELP_END
 };

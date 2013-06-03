@@ -138,6 +138,7 @@ fails == flexbox-minSize-vert-1.xhtml  flexbox-minSize-vert-1-ref.xhtml # bug 85
 # Tests for the order in which we paint flex items
 == flexbox-paint-ordering-1.xhtml flexbox-paint-ordering-1-ref.xhtml
 == flexbox-paint-ordering-2.xhtml flexbox-paint-ordering-2-ref.xhtml
+fails == flexbox-paint-ordering-3.html  flexbox-paint-ordering-3-ref.html # bug 874718
 
 # Tests for handling of absolutely/fixed/relatively-positioned flex items.
 == flexbox-position-absolute-1.xhtml  flexbox-position-absolute-1-ref.xhtml
@@ -228,3 +229,4 @@ fuzzy-if(gtk2Widget,1,31) == flexbox-widget-flex-items-4.html flexbox-widget-fle
 # Tests for flex containers with pseudo-elements
 == flexbox-with-pseudo-elements-1.html flexbox-with-pseudo-elements-1-ref.html
 == flexbox-with-pseudo-elements-2.html flexbox-with-pseudo-elements-2-ref.html
+== flexbox-with-pseudo-elements-3.html flexbox-with-pseudo-elements-3-ref.html

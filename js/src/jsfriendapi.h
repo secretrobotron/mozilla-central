@@ -14,6 +14,8 @@
 #include "jspubtd.h"
 #include "jsprvtd.h"
 
+#include "js/CallArgs.h"
+
 /*
  * This macro checks if the stack pointer has exceeded a given limit. If
  * |tolerance| is non-zero, it returns true only if the stack pointer has
@@ -177,7 +179,8 @@ struct JSFunctionSpecWithHelp {
 extern JS_FRIEND_API(bool)
 JS_DefineFunctionsWithHelp(JSContext *cx, JSObject *obj, const JSFunctionSpecWithHelp *fs);
 
-typedef bool (* JS_SourceHook)(JSContext *cx, JSScript *script, jschar **src, uint32_t *length);
+typedef bool (* JS_SourceHook)(JSContext *cx, JS::Handle<JSScript*> script,
+                               jschar **src, uint32_t *length);
 
 extern JS_FRIEND_API(void)
 JS_SetSourceHook(JSRuntime *rt, JS_SourceHook hook);
@@ -321,8 +324,9 @@ struct TypeObject {
 };
 
 struct BaseShape {
-    js::Class   *clasp;
-    JSObject    *parent;
+    js::Class *clasp;
+    JSObject *parent;
+    JSObject *_1;
     JSCompartment *compartment;
 };
 
@@ -422,6 +426,10 @@ GetObjectParentMaybeScope(JSObject *obj);
 
 JS_FRIEND_API(JSObject *)
 GetGlobalForObjectCrossCompartment(JSObject *obj);
+
+// For legacy consumers only. This whole concept is going away soon.
+JS_FRIEND_API(JSObject *)
+GetDefaultGlobalForContext(JSContext *cx);
 
 JS_FRIEND_API(void)
 NotifyAnimationActivity(JSObject *obj);
@@ -754,7 +762,7 @@ extern JS_FRIEND_API(bool)
 IsContextRunningJS(JSContext *cx);
 
 typedef void
-(* AnalysisPurgeCallback)(JSRuntime *rt, JSFlatString *desc);
+(* AnalysisPurgeCallback)(JSRuntime *rt, JS::Handle<JSFlatString*> desc);
 
 extern JS_FRIEND_API(AnalysisPurgeCallback)
 SetAnalysisPurgeCallback(JSRuntime *rt, AnalysisPurgeCallback callback);
@@ -960,6 +968,137 @@ enum ViewType {
 };
 
 } /* namespace ArrayBufferView */
+
+/*
+ * A helper for building up an ArrayBuffer object's data
+ * before creating the ArrayBuffer itself.  Will do doubling
+ * based reallocation, up to an optional maximum growth given.
+ *
+ * When all the data has been appended, call getArrayBuffer,
+ * passing in the JSContext* for which the ArrayBuffer object
+ * is to be created.  This also implicitly resets the builder,
+ * or it can be reset explicitly at any point by calling reset().
+ */
+class ArrayBufferBuilder
+{
+    void *rawcontents_;
+    uint8_t *dataptr_;
+    uint32_t capacity_;
+    uint32_t length_;
+  public:
+    ArrayBufferBuilder()
+        : rawcontents_(NULL),
+          dataptr_(NULL),
+          capacity_(0),
+          length_(0)
+    {
+    }
+
+    ~ArrayBufferBuilder() {
+        reset();
+    }
+
+    void reset() {
+        if (rawcontents_)
+            JS_free(NULL, rawcontents_);
+        rawcontents_ = dataptr_ = NULL;
+        capacity_ = length_ = 0;
+    }
+
+    // will truncate if newcap is < length()
+    bool setCapacity(uint32_t newcap) {
+        if (!JS_ReallocateArrayBufferContents(NULL, newcap, &rawcontents_, &dataptr_))
+            return false;
+
+        capacity_ = newcap;
+        if (length_ > newcap)
+            length_ = newcap;
+
+        return true;
+    }
+
+    // Append datalen bytes from data to the current buffer.  If we
+    // need to grow the buffer, grow by doubling the size up to a
+    // maximum of maxgrowth (if given).  If datalen is greater than
+    // what the new capacity would end up as, then grow by datalen.
+    //
+    // The data parameter must not overlap with anything beyond the
+    // builder's current valid contents [0..length)
+    bool append(const uint8_t *newdata, uint32_t datalen, uint32_t maxgrowth = 0) {
+        if (length_ + datalen > capacity_) {
+            uint32_t newcap;
+            // double while under maxgrowth or if not specified
+            if (!maxgrowth || capacity_ < maxgrowth)
+                newcap = capacity_ * 2;
+            else
+                newcap = capacity_ + maxgrowth;
+
+            // but make sure there's always enough to satisfy our request
+            if (newcap < length_ + datalen)
+                newcap = length_ + datalen;
+
+            // did we overflow?
+            if (newcap < capacity_)
+                return false;
+
+            if (!setCapacity(newcap))
+                return false;
+        }
+
+        // assert that the region isn't overlapping so we can memcpy;
+        JS_ASSERT(!areOverlappingRegions(newdata, datalen, dataptr_ + length_, datalen));
+
+        memcpy(dataptr_ + length_, newdata, datalen);
+        length_ += datalen;
+
+        return true;
+    }
+
+    uint8_t *data() {
+        return dataptr_;
+    }
+
+    uint32_t length() {
+        return length_;
+    }
+
+    uint32_t capacity() {
+        return capacity_;
+    }
+
+    JSObject* getArrayBuffer(JSContext *cx) {
+        // we need to check for length_ == 0, because nothing may have been
+        // added
+        if (capacity_ > length_ || length_ == 0) {
+            if (!setCapacity(length_))
+                return NULL;
+        }
+
+        JSObject* obj = JS_NewArrayBufferWithContents(cx, rawcontents_);
+        if (!obj)
+            return NULL;
+
+        rawcontents_ = dataptr_ = NULL;
+        length_ = capacity_ = 0;
+
+        return obj;
+    }
+
+protected:
+
+    static bool areOverlappingRegions(const uint8_t *start1, uint32_t length1,
+                                      const uint8_t *start2, uint32_t length2)
+    {
+        const uint8_t *end1 = start1 + length1;
+        const uint8_t *end2 = start2 + length2;
+
+        const uint8_t *max_start = start1 > start2 ? start1 : start2;
+        const uint8_t *min_end   = end1 < end2 ? end1 : end2;
+
+        return max_start < min_end;
+    }
+};
+
 } /* namespace js */
 
 typedef js::ArrayBufferView::ViewType JSArrayBufferViewType;
@@ -1297,13 +1436,85 @@ JS_FRIEND_API(void *)
 JS_GetDataViewData(JSObject *obj);
 
 /*
+ * A class, expected to be passed by value, which represents the CallArgs for a
+ * JSJitGetterOp.
+ */
+class JSJitGetterCallArgs : protected JS::MutableHandleValue
+{
+  public:
+    explicit JSJitGetterCallArgs(const JS::CallArgs& args)
+      : JS::MutableHandleValue(args.rval())
+    {}
+
+    JS::MutableHandleValue rval() {
+        return *this;
+    }
+};
+
+/*
+ * A class, expected to be passed by value, which represents the CallArgs for a
+ * JSJitSetterOp.
+ */
+class JSJitSetterCallArgs : protected JS::MutableHandleValue
+{
+  public:
+    explicit JSJitSetterCallArgs(const JS::CallArgs& args)
+      : JS::MutableHandleValue(args.handleAt(0))
+    {}
+
+    JS::MutableHandleValue handleAt(unsigned i) {
+        MOZ_ASSERT(i == 0);
+        return *this;
+    }
+
+    unsigned length() const { return 1; }
+
+    // Add get() or maybe hasDefined() as needed
+};
+
+/*
+ * A class, expected to be passed by reference, which represents the CallArgs
+ * for a JSJitMethodOp.
+ */
+class JSJitMethodCallArgs : protected JS::detail::CallArgsBase<JS::detail::NoUsedRval>
+{
+  private:
+    typedef JS::detail::CallArgsBase<JS::detail::NoUsedRval> Base;
+
+  public:
+    explicit JSJitMethodCallArgs(const JS::CallArgs& args) {
+        argv_ = args.array();
+        argc_ = args.length();
+    }
+
+    JS::MutableHandleValue rval() const {
+        return Base::rval();
+    }
+
+    unsigned length() const { return Base::length(); }
+
+    JS::MutableHandleValue handleAt(unsigned i) const {
+        return Base::handleAt(i);
+    }
+
+    bool hasDefined(unsigned i) const {
+        return Base::hasDefined(i);
+    }
+
+    // Add get() as needed
+};
+
+/*
  * This struct contains metadata passed from the DOM to the JS Engine for JIT
  * optimizations on DOM property accessors. Eventually, this should be made
  * available to general JSAPI users, but we are not currently ready to do so.
  */
 typedef bool
-(* JSJitPropertyOp)(JSContext *cx, JSHandleObject thisObj,
-                    void *specializedThis, JS::Value *vp);
+(* JSJitGetterOp)(JSContext *cx, JSHandleObject thisObj,
+                  void *specializedThis, JS::Value *vp);
+typedef bool
+(* JSJitSetterOp)(JSContext *cx, JSHandleObject thisObj,
+                  void *specializedThis, JS::Value *vp);
 typedef bool
 (* JSJitMethodOp)(JSContext *cx, JSHandleObject thisObj,
                   void *specializedThis, unsigned argc, JS::Value *vp);
@@ -1315,7 +1526,11 @@ struct JSJitInfo {
         Method
     };
 
-    JSJitPropertyOp op;
+    union {
+        JSJitGetterOp getter;
+        JSJitSetterOp setter;
+        JSJitMethodOp method;
+    };
     uint32_t protoID;
     uint32_t depth;
     OpType type;
@@ -1481,6 +1696,31 @@ assertEnteredPolicy(JSContext *cx, JSObject *obj, jsid id);
 #else
 inline void assertEnteredPolicy(JSContext *cx, JSObject *obj, jsid id) {};
 #endif
+
+typedef JSObject *
+(* ObjectMetadataCallback)(JSContext *cx);
+
+/*
+ * Specify a callback to invoke when creating each JS object in the current
+ * compartment, which may return a metadata object to associate with the
+ * object. Objects with different metadata have different shape hierarchies,
+ * so for efficiency, objects should generally try to share metadata objects.
+ */
+JS_FRIEND_API(void)
+SetObjectMetadataCallback(JSContext *cx, ObjectMetadataCallback callback);
+
+/* Manipulate the metadata associated with an object. */
+
+JS_FRIEND_API(bool)
+SetObjectMetadata(JSContext *cx, JSHandleObject obj, JSHandleObject metadata);
+
+JS_FRIEND_API(JSObject *)
+GetObjectMetadata(JSObject *obj);
+
+/* ES5 8.12.8. */
+extern JS_FRIEND_API(JSBool)
+DefaultValue(JSContext *cx, HandleObject obj, JSType hint, MutableHandleValue vp);
+
 
 } /* namespace js */
 

@@ -17,28 +17,26 @@
 #include "jscntxt.h"
 #include "jsfriendapi.h"
 #include "jsfun.h"
-#include "jsinterp.h"
 #include "jsiter.h"
 #include "jsnum.h"
 #include "jsobj.h"
 #include "jstypes.h"
 #include "jsutil.h"
 #include "ds/Sort.h"
-#include "methodjit/MethodJIT.h"
-#include "methodjit/StubCalls-inl.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/ForkJoin.h"
+#include "vm/Interpreter.h"
 #include "vm/NumericConversions.h"
 #include "vm/Shape.h"
 #include "vm/StringBuffer.h"
 
 #include "jsatominlines.h"
 #include "jscntxtinlines.h"
-#include "jsinterpinlines.h"
 #include "jsobjinlines.h"
 #include "jsstrinlines.h"
 
 #include "vm/ArgumentsObject-inl.h"
+#include "vm/Interpreter-inl.h"
 #include "vm/ObjectImpl-inl.h"
 
 using namespace js;
@@ -47,6 +45,7 @@ using namespace js::types;
 
 using mozilla::ArrayLength;
 using mozilla::DebugOnly;
+using mozilla::IsNaN;
 using mozilla::PointerRangeSize;
 
 JSBool
@@ -131,19 +130,6 @@ js::StringIsArrayIndex(JSLinearString *str, uint32_t *indexp)
     }
 
     return false;
-}
-
-Shape *
-js::GetDenseArrayShape(JSContext *cx, HandleObject globalObj)
-{
-    JS_ASSERT(globalObj);
-
-    JSObject *proto = globalObj->global().getOrCreateArrayPrototype(cx);
-    if (!proto)
-        return NULL;
-
-    return EmptyShape::getInitialShape(cx, &ArrayClass, proto, proto->getParent(),
-                                       gc::FINALIZE_OBJECT0);
 }
 
 bool
@@ -1471,7 +1457,7 @@ SortComparatorFunction::operator()(const Value &a, const Value &b, bool *lessOrE
      * 'consistent compare functions' that don't return NaN, but is silent
      * about what the result should be. So we currently ignore it.
      */
-    *lessOrEqualp = (MOZ_DOUBLE_IS_NaN(cmp) || cmp <= 0);
+    *lessOrEqualp = (IsNaN(cmp) || cmp <= 0);
     return true;
 }
 
@@ -2005,15 +1991,6 @@ js::ArrayShiftMoveElements(JSObject *obj)
     obj->moveDenseElementsUnbarriered(0, 1, initlen);
 }
 
-#ifdef JS_METHODJIT
-void JS_FASTCALL
-mjit::stubs::ArrayShift(VMFrame &f)
-{
-    JSObject *obj = &f.regs.sp[-1].toObject();
-    ArrayShiftMoveElements(obj);
-}
-#endif /* JS_METHODJIT */
-
 /* ES5 15.4.4.9 */
 JSBool
 js::array_shift(JSContext *cx, unsigned argc, Value *vp)
@@ -2436,7 +2413,7 @@ array_splice(JSContext *cx, unsigned argc, Value *vp)
     return true;
 }
 
-#ifdef JS_METHODJIT
+#ifdef JS_ION
 bool
 js::array_concat_dense(JSContext *cx, HandleObject obj1, HandleObject obj2, HandleObject result)
 {
@@ -2459,22 +2436,10 @@ js::array_concat_dense(JSContext *cx, HandleObject obj1, HandleObject obj2, Hand
 
     result->initDenseElements(0, obj1->getDenseElements(), initlen1);
     result->initDenseElements(initlen1, obj2->getDenseElements(), initlen2);
-
     result->setArrayLengthInt32(len);
     return true;
 }
-
-void JS_FASTCALL
-mjit::stubs::ArrayConcatTwoArrays(VMFrame &f)
-{
-    RootedObject result(f.cx, &f.regs.sp[-3].toObject());
-    RootedObject obj1(f.cx, &f.regs.sp[-2].toObject());
-    RootedObject obj2(f.cx, &f.regs.sp[-1].toObject());
-
-    if (!array_concat_dense(f.cx, obj1, obj2, result))
-        THROW();
-}
-#endif /* JS_METHODJIT */
+#endif /* JS_ION */
 
 /*
  * Python-esque sequence operations.
@@ -2843,7 +2808,8 @@ js_InitArrayClass(JSContext *cx, HandleObject obj)
     if (!type)
         return NULL;
 
-    RootedShape shape(cx, EmptyShape::getInitialShape(cx, &ArrayClass, TaggedProto(proto), proto->getParent(),
+    RootedShape shape(cx, EmptyShape::getInitialShape(cx, &ArrayClass, TaggedProto(proto),
+                                                      proto->getParent(), NewObjectMetadata(cx),
                                                       gc::FINALIZE_OBJECT0));
 
     RootedObject arrayProto(cx, JSObject::createArray(cx, gc::FINALIZE_OBJECT4, gc::TenuredHeap, shape, type, 0));
@@ -2912,6 +2878,7 @@ NewArray(JSContext *cx, uint32_t length, JSObject *protoArg, NewObjectKind newKi
 
     NewObjectCache::EntryIndex entry = -1;
     if (newKind == GenericObject &&
+        !cx->compartment->objectMetadataCallback &&
         cache.lookupGlobal(&ArrayClass, cx->global(), allocKind, &entry))
     {
         RootedObject obj(cx, cache.newObjectFromHit(cx, entry, GetInitialHeap(newKind, &ArrayClass)));
@@ -2941,7 +2908,7 @@ NewArray(JSContext *cx, uint32_t length, JSObject *protoArg, NewObjectKind newKi
      * See JSObject::createArray.
      */
     RootedShape shape(cx, EmptyShape::getInitialShape(cx, &ArrayClass, TaggedProto(proto),
-                                                      cx->global(), gc::FINALIZE_OBJECT0));
+                                                      cx->global(), NewObjectMetadata(cx), gc::FINALIZE_OBJECT0));
     if (!shape)
         return NULL;
 
@@ -2990,18 +2957,6 @@ js::NewDenseUnallocatedArray(JSContext *cx, uint32_t length, JSObject *proto /* 
 {
     return NewArray<false>(cx, length, proto, newKind);
 }
-
-#ifdef JS_METHODJIT
-JSObject * JS_FASTCALL
-mjit::stubs::NewDenseUnallocatedArray(VMFrame &f, uint32_t length)
-{
-    JSObject *obj = NewArray<false>(f.cx, length, (JSObject *)f.scratch);
-    if (!obj)
-        THROWV(NULL);
-
-    return obj;
-}
-#endif
 
 JSObject *
 js::NewDenseCopiedArray(JSContext *cx, uint32_t length, HandleObject src, uint32_t elementOffset,

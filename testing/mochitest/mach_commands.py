@@ -37,8 +37,8 @@ class MochitestRunner(MozbuildObject):
     to hook up result parsing, etc.
     """
     def run_mochitest_test(self, suite=None, test_file=None, debugger=None,
-        shuffle=False, keep_open=False, rerun_failures=False, no_autorun=False,
-        repeat=0, slow=False):
+        debugger_args=None, shuffle=False, keep_open=False, rerun_failures=False,
+        no_autorun=False, repeat=0, run_until_failure=False, slow=False):
         """Runs a mochitest.
 
         test_file is a path to a test file. It can be a relative path from the
@@ -50,6 +50,8 @@ class MochitestRunner(MozbuildObject):
 
         debugger is a program name or path to a binary (presumably a debugger)
         to run the test in. e.g. 'gdb'
+
+        debugger_args are the arguments passed to the debugger.
 
         shuffle is whether test order should be shuffled (defaults to false).
 
@@ -125,25 +127,18 @@ class MochitestRunner(MozbuildObject):
         else:
             raise Exception('None or unrecognized mochitest suite type.')
 
-        options = opts.verifyOptions(options, runner)
-
-        if options is None:
-            raise Exception('mochitest option validator failed.')
-
         options.autorun = not no_autorun
         options.closeWhenDone = not keep_open
         options.shuffle = shuffle
         options.consoleLevel = 'INFO'
         options.repeat = repeat
+        options.runUntilFailure = run_until_failure
         options.runSlower = slow
         options.testingModulesDir = os.path.join(tests_dir, 'modules')
         options.extraProfileFiles.append(os.path.join(self.distdir, 'plugins'))
         options.symbolsPath = os.path.join(self.distdir, 'crashreporter-symbols')
 
         options.failureFile = failure_file_path
-
-        automation.setServerInfo(options.webServer, options.httpPort,
-            options.sslPort, options.webSocketPort)
 
         if test_path:
             test_root = runner.getTestRoot(options)
@@ -161,6 +156,21 @@ class MochitestRunner(MozbuildObject):
 
         if debugger:
             options.debugger = debugger
+
+        if debugger_args:
+            if options.debugger == None:
+                print("--debugger-args passed, but no debugger specified.")
+                return 1
+            options.debuggerArgs = debugger_args
+
+        options = opts.verifyOptions(options, runner)
+
+        if options is None:
+            raise Exception('mochitest option validator failed.')
+
+        automation.setServerInfo(options.webServer, options.httpPort,
+            options.sslPort, options.webSocketPort)
+
 
         # We need this to enable colorization of output.
         self.log_manager.enable_unstructured()
@@ -186,6 +196,7 @@ class MochitestRunner(MozbuildObject):
         self.log_manager.disable_unstructured()
 
         if test_output.getvalue():
+            result = 1
             for line in test_output.getvalue().splitlines():
                 self.log(logging.INFO, 'unexpected', {'msg': line}, '{msg}')
 
@@ -203,6 +214,10 @@ def MochitestCommand(func):
     debugger = CommandArgument('--debugger', '-d', metavar='DEBUGGER',
         help='Debugger binary to run test in. Program name or path.')
     func = debugger(func)
+
+    debugger_args = CommandArgument('--debugger-args',
+        metavar='DEBUGGER_ARGS', help='Arguments to pass to the debugger.')
+    func = debugger_args(func)
 
     shuffle = CommandArgument('--shuffle', action='store_true',
         help='Shuffle execution order.')
@@ -224,6 +239,12 @@ def MochitestCommand(func):
         help='Repeat the test the given number of times.')
     func = repeat(func)
 
+    runUntilFailure = CommandArgument("--run-until-failure", action='store_true',
+        help='Run a test repeatedly and stops on the first time the test fails. ' \
+             'Only available when running a single test. Default cap is 30 runs, ' \
+             'which can be overwritten with the --repeat parameter.')
+    func = runUntilFailure(func)
+
     slow = CommandArgument('--slow', action='store_true',
         help='Delay execution between tests.')
     func = slow(func)
@@ -240,27 +261,32 @@ def MochitestCommand(func):
 
 @CommandProvider
 class MachCommands(MachCommandBase):
-    @Command('mochitest-plain', help='Run a plain mochitest.')
+    @Command('mochitest-plain', category='testing',
+        description='Run a plain mochitest.')
     @MochitestCommand
     def run_mochitest_plain(self, test_file, **kwargs):
         return self.run_mochitest(test_file, 'plain', **kwargs)
 
-    @Command('mochitest-chrome', help='Run a chrome mochitest.')
+    @Command('mochitest-chrome', category='testing',
+        description='Run a chrome mochitest.')
     @MochitestCommand
     def run_mochitest_chrome(self, test_file, **kwargs):
         return self.run_mochitest(test_file, 'chrome', **kwargs)
 
-    @Command('mochitest-browser', help='Run a mochitest with browser chrome.')
+    @Command('mochitest-browser', category='testing',
+        description='Run a mochitest with browser chrome.')
     @MochitestCommand
     def run_mochitest_browser(self, test_file, **kwargs):
         return self.run_mochitest(test_file, 'browser', **kwargs)
 
-    @Command('mochitest-metro', help='Run a mochitest with metro browser chrome.')
+    @Command('mochitest-metro', category='testing',
+        description='Run a mochitest with metro browser chrome.')
     @MochitestCommand
     def run_mochitest_metro(self, test_file, **kwargs):
         return self.run_mochitest(test_file, 'metro', **kwargs)
 
-    @Command('mochitest-a11y', help='Run an a11y mochitest.')
+    @Command('mochitest-a11y', category='testing',
+        description='Run an a11y mochitest.')
     @MochitestCommand
     def run_mochitest_a11y(self, test_file, **kwargs):
         return self.run_mochitest(test_file, 'a11y', **kwargs)

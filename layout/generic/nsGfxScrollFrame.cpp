@@ -932,6 +932,40 @@ nsGfxScrollFrameInner::GetDesiredScrollbarSizes(nsBoxLayoutState* aState)
   return result;
 }
 
+nscoord
+nsGfxScrollFrameInner::GetNondisappearingScrollbarWidth(nsBoxLayoutState* aState)
+{
+  NS_ASSERTION(aState && aState->GetRenderingContext(),
+               "Must have rendering context in layout state for size "
+               "computations");
+
+  if (LookAndFeel::GetInt(LookAndFeel::eIntID_UseOverlayScrollbars) != 0) {
+    // We're using overlay scrollbars, so we need to get the width that
+    // non-disappearing scrollbars would have.
+    nsITheme* theme = aState->PresContext()->GetTheme();
+    if (theme &&
+        theme->ThemeSupportsWidget(aState->PresContext(),
+                                   mVScrollbarBox,
+                                   NS_THEME_SCROLLBAR_NON_DISAPPEARING)) {
+      nsIntSize size;
+      nsRenderingContext* rendContext = aState->GetRenderingContext();
+      if (rendContext) {
+        bool canOverride = true;
+        theme->GetMinimumWidgetSize(rendContext,
+                                    mVScrollbarBox,
+                                    NS_THEME_SCROLLBAR_NON_DISAPPEARING,
+                                    &size,
+                                    &canOverride);
+        if (size.width) {
+          return aState->PresContext()->DevPixelsToAppUnits(size.width);
+        }
+      }
+    }
+  }
+
+  return GetDesiredScrollbarSizes(aState).LeftRight();
+}
+
 nsresult
 nsXULScrollFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
 {
@@ -1575,10 +1609,9 @@ nsGfxScrollFrameInner::ScrollToCSSPixels(nsIntPoint aScrollPosition)
 }
 
 void
-nsGfxScrollFrameInner::ScrollToCSSPixelsApproximate(const Point& aScrollPosition)
+nsGfxScrollFrameInner::ScrollToCSSPixelsApproximate(const CSSPoint& aScrollPosition)
 {
-  nsPoint pt(nsPresContext::CSSPixelsToAppUnits(aScrollPosition.x),
-             nsPresContext::CSSPixelsToAppUnits(aScrollPosition.y));
+  nsPoint pt = CSSPoint::ToAppUnits(aScrollPosition);
   nscoord halfRange = nsPresContext::CSSPixelsToAppUnits(1000);
   nsRect range(pt.x - halfRange, pt.y - halfRange, 2*halfRange - 1, 2*halfRange - 1);
   ScrollTo(pt, nsIScrollableFrame::INSTANT, &range);
@@ -3734,7 +3767,9 @@ nsGfxScrollFrameInner::LayoutScrollbars(nsBoxLayoutState& aState,
     AdjustScrollbarRectForResizer(mOuter, presContext, hRect, hasResizer, false);
   }
 
-  AdjustOverlappingScrollbars(vRect, hRect);
+  if (!LookAndFeel::GetInt(LookAndFeel::eIntID_AllowOverlayScrollbarsOverlap)) {
+    AdjustOverlappingScrollbars(vRect, hRect);
+  }
   if (mVScrollbarBox) {
     nsBoxFrame::LayoutChildAt(aState, mVScrollbarBox, vRect);
   }
@@ -3941,6 +3976,12 @@ nsGfxScrollFrameInner::SaveState()
   nsIScrollbarMediator* mediator = do_QueryFrame(GetScrolledFrame());
   if (mediator) {
     // child handles its own scroll state, so don't bother saving state here
+    return nullptr;
+  }
+
+  // Don't store a scroll state if we never have been scrolled or restored
+  // a previous scroll state.
+  if (!mHasBeenScrolled && !mDidHistoryRestore) {
     return nullptr;
   }
 

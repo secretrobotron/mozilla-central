@@ -10,14 +10,13 @@ const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cu = Components.utils;
 
-
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
     "resource:///modules/devtools/gDevTools.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "devtools",
-    "resource:///modules/devtools/gDevTools.jsm");
+    "resource://gre/modules/devtools/Loader.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
     "resource://gre/modules/Services.jsm");
@@ -36,6 +35,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "Promise",
 
 XPCOMUtils.defineLazyModuleGetter(this, "ViewHelpers",
     "resource:///modules/devtools/ViewHelpers.jsm");
+
+let Telemetry = devtools.require("devtools/shared/telemetry");
 
 const STRINGS_URI = "chrome://browser/locale/devtools/webconsole.properties";
 let l10n = new WebConsoleUtils.l10n(STRINGS_URI);
@@ -337,6 +338,12 @@ WebConsole.prototype = {
   viewSourceInStyleEditor:
   function WC_viewSourceInStyleEditor(aSourceURL, aSourceLine)
   {
+    let toolbox = gDevTools.getToolbox(this.target);
+    if (!toolbox) {
+      this.viewSource(aSourceURL, aSourceLine);
+      return;
+    }
+
     gDevTools.showToolbox(this.target, "styleeditor").then(function(toolbox) {
       try {
         toolbox.getCurrentPanel().selectStyleSheet(aSourceURL, aSourceLine);
@@ -515,6 +522,7 @@ WebConsole.prototype = {
 function BrowserConsole()
 {
   WebConsole.apply(this, arguments);
+  this._telemetry = new Telemetry();
 }
 
 ViewHelpers.create({ constructor: BrowserConsole, proto: WebConsole.prototype },
@@ -538,18 +546,21 @@ ViewHelpers.create({ constructor: BrowserConsole, proto: WebConsole.prototype },
     }
 
     let window = this.iframeWindow;
+
+    // Make sure that the closing of the Browser Console window destroys this
+    // instance.
     let onClose = () => {
       window.removeEventListener("unload", onClose);
       this.destroy();
     };
     window.addEventListener("unload", onClose);
 
-    this._bc_init = this.$init().then((aReason) => {
-      let title = this.ui.rootElement.getAttribute("browserConsoleTitle");
-      this.ui.rootElement.setAttribute("title", title);
-      return aReason;
-    });
+    // Make sure Ctrl-W closes the Browser Console window.
+    window.document.getElementById("cmd_close").removeAttribute("disabled");
 
+    this._telemetry.toolOpened("browserconsole");
+
+    this._bc_init = this.$init();
     return this._bc_init;
   },
 
@@ -566,6 +577,8 @@ ViewHelpers.create({ constructor: BrowserConsole, proto: WebConsole.prototype },
     if (this._bc_destroyer) {
       return this._bc_destroyer.promise;
     }
+
+    this._telemetry.toolClosed("browserconsole");
 
     this._bc_destroyer = Promise.defer();
 
@@ -691,8 +704,13 @@ var HeadsUpDisplayUICommands = {
 
       let win = Services.ww.openWindow(null, devtools.Tools.webConsole.url, "_blank",
                                        BROWSER_CONSOLE_WINDOW_FEATURES, null);
-      win.addEventListener("load", function onLoad() {
-        win.removeEventListener("load", onLoad);
+      win.addEventListener("DOMContentLoaded", function onLoad() {
+        win.removeEventListener("DOMContentLoaded", onLoad);
+
+        // Set the correct Browser Console title.
+        let root = win.document.documentElement;
+        root.setAttribute("title", root.getAttribute("browserConsoleTitle"));
+
         deferred.resolve(win);
       });
 

@@ -104,6 +104,7 @@
 #include "DocumentType.h"
 #include <algorithm>
 #include "nsDOMEvent.h"
+#include "nsGlobalWindow.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -677,11 +678,13 @@ nsINode::SetUserData(const nsAString &aKey, nsIVariant *aData,
 }
 
 JS::Value
-nsINode::SetUserData(JSContext* aCx, const nsAString& aKey, JS::Value aData,
+nsINode::SetUserData(JSContext* aCx, const nsAString& aKey,
+                     JS::Handle<JS::Value> aData,
                      nsIDOMUserDataHandler* aHandler, ErrorResult& aError)
 {
   nsCOMPtr<nsIVariant> data;
-  aError = nsContentUtils::XPConnect()->JSValToVariant(aCx, &aData,
+  JS::Rooted<JS::Value> dataVal(aCx, aData);
+  aError = nsContentUtils::XPConnect()->JSValToVariant(aCx, dataVal.address(),
                                                        getter_AddRefs(data));
   if (aError.Failed()) {
     return JS::UndefinedValue();
@@ -1163,13 +1166,13 @@ nsINode::GetContextForEventHandlers(nsresult* aRv)
   return nsContentUtils::GetContextForEventHandlers(this, aRv);
 }
 
-/* static */
-void
-nsINode::Trace(nsINode *tmp, TraceCallback cb, void *closure)
+nsIDOMWindow*
+nsINode::GetOwnerGlobal()
 {
-  nsContentUtils::TraceWrapper(tmp, cb, closure);
+  bool dummy;
+  return nsPIDOMWindow::GetOuterFromCurrentInner(
+    static_cast<nsGlobalWindow*>(OwnerDoc()->GetScriptHandlingObject(dummy)));
 }
-
 
 bool
 nsINode::UnoptimizableCCNode() const
@@ -2094,7 +2097,7 @@ nsINode::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
   }                                                                          \
   NS_IMETHODIMP nsINode::GetOn##name_(JSContext *cx, JS::Value *vp) {        \
     EventHandlerNonNull* h = GetOn##name_();                                 \
-    vp->setObjectOrNull(h ? h->Callable() : nullptr);                        \
+    vp->setObjectOrNull(h ? h->Callable().get() : nullptr);                  \
     return NS_OK;                                                            \
   }                                                                          \
   NS_IMETHODIMP nsINode::SetOn##name_(JSContext *cx, const JS::Value &v) {   \
@@ -2397,7 +2400,7 @@ nsINode::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aScope)
   JS::Rooted<JSObject*> obj(aCx, WrapNode(aCx, aScope));
   if (obj && ChromeOnlyAccess() &&
       !nsContentUtils::IsSystemPrincipal(NodePrincipal()) &&
-      xpc::AllowXBLScope(js::GetContextCompartment(aCx)))
+      xpc::AllowXBLScope(js::GetObjectCompartment(obj)))
   {
     // Create a new wrapper and cache it.
     JSAutoCompartment ac(aCx, obj);

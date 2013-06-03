@@ -5,7 +5,6 @@
 
 #include "mozilla/dom/SVGAltGlyphElement.h"
 #include "mozilla/dom/SVGAltGlyphElementBinding.h"
-#include "nsContentUtils.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(AltGlyph)
 
@@ -87,12 +86,6 @@ SVGAltGlyphElement::IsAttributeMapped(const nsIAtom* name) const
 
 //----------------------------------------------------------------------
 // nsSVGElement overrides
-
-bool
-SVGAltGlyphElement::IsEventName(nsIAtom* aName)
-{
-  return nsContentUtils::IsEventAttributeName(aName, EventNameType_SVGGraphic);
-}
 
 nsSVGElement::StringAttributesInfo
 SVGAltGlyphElement::GetStringInfo()

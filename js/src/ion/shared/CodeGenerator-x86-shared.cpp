@@ -283,11 +283,11 @@ CodeGeneratorX86Shared::bailout(const T &binder, LSnapshot *snapshot)
     CompileInfo &info = snapshot->mir()->block()->info();
     switch (info.executionMode()) {
       case ParallelExecution: {
-        // In parallel mode, make no attempt to recover, just signal an error.
-        Label *ool;
-        if (!ensureOutOfLineParallelAbort(&ool))
-            return false;
-        binder(masm, ool);
+        // in parallel mode, make no attempt to recover, just signal an error.
+        OutOfLineParallelAbort *ool = oolParallelAbort(ParallelBailoutUnsupported,
+                                                       snapshot->mir()->block(),
+                                                       snapshot->mir()->pc());
+        binder(masm, ool->entry());
         return true;
       }
       case SequentialExecution:
@@ -636,10 +636,11 @@ CodeGeneratorX86Shared::visitMulI(LMulI *ins)
 bool
 CodeGeneratorX86Shared::visitAsmJSDivOrMod(LAsmJSDivOrMod *ins)
 {
-    JS_ASSERT(ToRegister(ins->remainder()) == edx);
     JS_ASSERT(ToRegister(ins->lhs()) == eax);
     Register rhs = ToRegister(ins->rhs());
     Register output = ToRegister(ins->output());
+
+    JS_ASSERT_IF(output == eax, ToRegister(ins->remainder()) == edx);
 
     Label afterDiv;
 

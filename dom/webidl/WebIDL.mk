@@ -23,6 +23,7 @@ webidl_files = \
   AudioParam.webidl \
   AudioStreamTrack.webidl \
   AudioProcessingEvent.webidl \
+  BarProp.webidl \
   BatteryManager.webidl \
   BeforeUnloadEvent.webidl \
   BiquadFilterNode.webidl \
@@ -38,6 +39,7 @@ webidl_files = \
   ClientRect.webidl \
   ClientRectList.webidl \
   ClipboardEvent.webidl \
+  CameraManager.webidl \
   CommandEvent.webidl \
   Comment.webidl \
   CompositionEvent.webidl \
@@ -48,13 +50,16 @@ webidl_files = \
   CSSStyleSheet.webidl \
   CSSValue.webidl \
   CSSValueList.webidl \
+  DataContainerEvent.webidl \
   DelayNode.webidl \
   DesktopNotification.webidl \
   DeviceMotionEvent.webidl \
+  DeviceStorage.webidl \
   Document.webidl \
   DocumentFragment.webidl \
   DocumentType.webidl \
   DOMCursor.webidl \
+  DOMError.webidl \
   DOMImplementation.webidl \
   DOMParser.webidl \
   DOMRequest.webidl \
@@ -146,15 +151,18 @@ webidl_files = \
   HTMLTableSectionElement.webidl \
   HTMLTemplateElement.webidl \
   HTMLTextAreaElement.webidl \
+  HTMLTrackElement.webidl \
   HTMLTimeElement.webidl \
   HTMLTitleElement.webidl \
   HTMLUListElement.webidl \
   HTMLVideoElement.webidl \
+  IDBDatabase.webidl \
   IDBFactory.webidl \
   IDBVersionChangeEvent.webidl \
   ImageData.webidl \
   ImageDocument.webidl \
   InspectorUtils.webidl \
+  KeyboardEvent.webidl \
   KeyEvent.webidl \
   LinkStyle.webidl \
   LocalMediaStream.webidl \
@@ -162,11 +170,14 @@ webidl_files = \
   MediaError.webidl \
   MediaStream.webidl \
   MediaStreamAudioSourceNode.webidl \
+  MediaStreamEvent.webidl \
   MediaStreamTrack.webidl \
   MessageEvent.webidl \
+  MobileMessageManager.webidl \
   MouseEvent.webidl \
   MouseScrollEvent.webidl \
   MozActivity.webidl \
+  MozMmsMessage.webidl \
   MozNamedAttrMap.webidl \
   MutationEvent.webidl \
   MutationObserver.webidl \
@@ -178,6 +189,9 @@ webidl_files = \
   Notification.webidl \
   NotifyAudioAvailableEvent.webidl \
   NotifyPaintEvent.webidl \
+  OfflineAudioCompletionEvent.webidl \
+  OfflineAudioContext.webidl \
+  OfflineResourceList.webidl \
   PaintRequest.webidl \
   PaintRequestList.webidl \
   PannerNode.webidl \
@@ -191,6 +205,11 @@ webidl_files = \
   Rect.webidl \
   RGBColor.webidl \
   RTCConfiguration.webidl \
+  RTCDataChannelEvent.webidl \
+  RTCIceCandidate.webidl \
+  RTCPeerConnection.webidl \
+  RTCPeerConnectionIceEvent.webidl \
+  RTCSessionDescription.webidl \
   Screen.webidl \
   ScriptProcessorNode.webidl \
   ScrollAreaEvent.webidl \
@@ -207,6 +226,7 @@ webidl_files = \
   SVGAnimatedPathData.webidl \
   SVGAnimatedPoints.webidl \
   SVGAnimatedPreserveAspectRatio.webidl \
+  SVGAnimatedRect.webidl \
   SVGAnimatedTransformList.webidl \
   SVGAnimateElement.webidl \
   SVGAnimateMotionElement.webidl \
@@ -299,6 +319,11 @@ webidl_files = \
   Text.webidl \
   TextDecoder.webidl \
   TextEncoder.webidl \
+  TextTrack.webidl \
+  TextTrackCue.webidl \
+  TextTrackCueList.webidl \
+  TextTrackList.webidl \
+  TimeEvent.webidl \
   TimeRanges.webidl \
   Touch.webidl \
   TouchEvent.webidl \
@@ -315,6 +340,8 @@ webidl_files = \
   URLUtils.webidl \
   USSDReceivedEvent.webidl \
   VideoStreamTrack.webidl \
+  WaveShaperNode.webidl \
+  WaveTable.webidl \
   Window.webidl \
   XMLDocument.webidl \
   XMLHttpRequest.webidl \
@@ -342,6 +369,7 @@ endif
 
 ifdef MOZ_WEBRTC
 webidl_files += \
+  DataChannel.webidl \
   MediaStreamList.webidl \
   $(NULL)
 endif

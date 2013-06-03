@@ -394,8 +394,9 @@ public class TopSitesView extends GridView {
         }
 
         public void setUrl(String url) {
-            if (mUrl != null && mUrl.equals(url))
+            if (mUrl != null && mUrl.equals(url)) {
                 return;
+            }
             mUrl = url;
             updateTitleView();
         }
@@ -412,6 +413,7 @@ public class TopSitesView extends GridView {
             } else {
                 titleView.setVisibility(View.INVISIBLE);
             }
+            titleView.invalidate();
         }
 
         private Drawable getPinDrawable() {
@@ -655,7 +657,7 @@ public class TopSitesView extends GridView {
 
                         final byte[] b = c.getBlob(c.getColumnIndexOrThrow(Thumbnails.DATA));
                         Bitmap bitmap = null;
-                        if (b != null) {
+                        if (b != null && b.length > 0) {
                             bitmap = BitmapUtils.decodeByteArray(b);
                         }
                         c.close();

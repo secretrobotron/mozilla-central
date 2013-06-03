@@ -130,7 +130,7 @@ struct AudioTimelineEvent {
 private:
   static bool IsValid(double value)
   {
-    return MOZ_DOUBLE_IS_FINITE(value);
+    return mozilla::IsFinite(value);
   }
 };
 
@@ -393,6 +393,10 @@ public:
 
   static float ExtractValueFromCurve(double startTime, float* aCurve, uint32_t aCurveLength, double duration, double t)
   {
+    if (t >= startTime + duration) {
+      // After the duration, return the last curve value
+      return aCurve[aCurveLength - 1];
+    }
     double ratio = (t - startTime) / duration;
     MOZ_ASSERT(ratio >= 0.0, "Ratio can never be negative here");
     if (ratio >= 1.0) {

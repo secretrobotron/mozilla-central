@@ -12,13 +12,13 @@
 #include "IonCode.h"
 #include "CompileInfo.h"
 #include "jsinfer.h"
-#include "jsinterp.h"
+
+#include "vm/Interpreter.h"
 
 namespace js {
 namespace ion {
 
 class TempAllocator;
-class ParallelCompileContext; // in ParallelArrayAnalysis.h
 
 // Possible register allocators which may be used.
 enum IonRegisterAllocator {
@@ -285,6 +285,8 @@ MethodStatus CompileFunctionForBaseline(JSContext *cx, HandleScript script, Abst
                                         bool isConstructing);
 MethodStatus CanEnterUsingFastInvoke(JSContext *cx, HandleScript script, uint32_t numActualArgs);
 
+MethodStatus CanEnterInParallel(JSContext *cx, HandleScript script);
+
 enum IonExecStatus
 {
     // The method call had to be aborted due to a stack limit check. This
@@ -296,11 +298,7 @@ enum IonExecStatus
     IonExec_Error,
 
     // The method call succeeed and returned a value.
-    IonExec_Ok,
-
-    // A guard triggered in IonMonkey and we must resume execution in
-    // the interpreter.
-    IonExec_Bailout
+    IonExec_Ok
 };
 
 static inline bool
@@ -310,10 +308,9 @@ IsErrorStatus(IonExecStatus status)
 }
 
 IonExecStatus Cannon(JSContext *cx, StackFrame *fp);
-IonExecStatus SideCannon(JSContext *cx, StackFrame *fp, jsbytecode *pc);
 
 // Used to enter Ion from C++ natives like Array.map. Called from FastInvokeGuard.
-IonExecStatus FastInvoke(JSContext *cx, HandleFunction fun, CallArgsList &args);
+IonExecStatus FastInvoke(JSContext *cx, HandleFunction fun, CallArgs &args);
 
 // Walk the stack and invalidate active Ion frames for the invalid scripts.
 void Invalidate(types::TypeCompartment &types, FreeOp *fop,
@@ -340,9 +337,12 @@ CodeGenerator *CompileBackEnd(MIRGenerator *mir, MacroAssembler *maybeMasm = NUL
 void AttachFinishedCompilations(JSContext *cx);
 void FinishOffThreadBuilder(IonBuilder *builder);
 
-static inline bool IsEnabled(JSContext *cx)
+static inline bool
+IsEnabled(JSContext *cx)
 {
-    return cx->hasOption(JSOPTION_ION) && cx->typeInferenceEnabled();
+    return cx->hasOption(JSOPTION_ION) &&
+        cx->hasOption(JSOPTION_BASELINE) &&
+        cx->typeInferenceEnabled();
 }
 
 void ForbidCompilation(JSContext *cx, JSScript *script);

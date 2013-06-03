@@ -203,10 +203,6 @@ DeleteGeneric(JSContext *cx, HandleObject obj, HandleId id, JSBool *succeeded);
 
 } /* namespace js::baseops */
 
-/* ES5 8.12.8. */
-extern JSBool
-DefaultValue(JSContext *cx, HandleObject obj, JSType hint, MutableHandleValue vp);
-
 extern Class ArrayClass;
 extern Class ArrayBufferClass;
 extern Class BlockClass;
@@ -229,6 +225,7 @@ extern Class ProxyClass;
 extern Class RegExpClass;
 extern Class RegExpStaticsClass;
 extern Class SetIteratorClass;
+extern Class ScriptSourceClass;
 extern Class StopIterationClass;
 extern Class StringClass;
 extern Class StrictArgumentsObjectClass;
@@ -526,6 +523,10 @@ class JSObject : public js::ObjectImpl
      * in this situation because non-scope objects can be on the scope chain).
      */
     inline JSObject *enclosingScope();
+
+    /* Access the metadata on an object. */
+    inline JSObject *getMetadata() const;
+    static bool setMetadata(JSContext *cx, js::HandleObject obj, js::HandleObject newMetadata);
 
     inline js::GlobalObject &global() const;
     using js::ObjectImpl::compartment;
@@ -979,6 +980,7 @@ class JSObject : public js::ObjectImpl
     inline bool isRegExpStatics() const;
     inline bool isScope() const;
     inline bool isScript() const;
+    inline bool isScriptSource() const;
     inline bool isSetIterator() const;
     inline bool isStopIteration() const;
     inline bool isTypedArray() const;
@@ -1031,6 +1033,7 @@ class JSObject : public js::ObjectImpl
     inline js::ScopeObject &asScope();
     inline js::SetObject &asSet();
     inline js::SetIteratorObject &asSetIterator();
+    inline js::ScriptSourceObject &asScriptSource();
     inline js::StrictArgumentsObject &asStrictArguments();
     inline js::StaticBlockObject &asStaticBlock();
     inline js::StringObject &asString();

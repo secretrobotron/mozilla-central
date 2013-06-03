@@ -10,6 +10,7 @@
 #include "mozilla/Assertions.h"
 #include "js/RootingAPI.h"
 
+struct JSTracer;
 class JSObject;
 struct JSContext;
 class XPCWrappedNativeScope;
@@ -178,6 +179,18 @@ public:
     }
   }
 
+  void TraceWrapper(const TraceCallbacks& aCallbacks, void* aClosure)
+  {
+    if (PreservingWrapper()) {
+      JSObject *wrapper = GetWrapperPreserveColor();
+      if (wrapper) {
+        uintptr_t flags = mWrapperPtrBits & kWrapperBitMask;
+        aCallbacks.Trace(&wrapper, "Preserved wrapper", aClosure);
+        mWrapperPtrBits = reinterpret_cast<uintptr_t>(wrapper) | flags;
+      }
+    }
+  }
+
 private:
   JSObject *GetJSObjectFromBits() const
   {
@@ -188,6 +201,8 @@ private:
     mWrapperPtrBits = reinterpret_cast<uintptr_t>(aWrapper) |
                       (mWrapperPtrBits & WRAPPER_IS_DOM_BINDING);
   }
+
+  void TraceJSObjectFromBits(JSTracer *aTrc, const char *aName);
 
   /**
    * If this bit is set then we're preserving the wrapper, which in effect ties
@@ -233,7 +248,7 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsWrapperCache, NS_WRAPPERCACHE_IID)
 // Cycle collector macros for wrapper caches.
 
 #define NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER \
-  nsContentUtils::TraceWrapper(tmp, aCallback, aClosure);
+  tmp->TraceWrapper(aCallbacks, aClosure);
 
 #define NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER \
   nsContentUtils::ReleaseWrapper(p, tmp);

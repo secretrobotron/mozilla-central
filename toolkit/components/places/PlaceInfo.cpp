@@ -90,12 +90,11 @@ PlaceInfo::GetVisits(JSContext* aContext,
                                   getter_AddRefs(wrapper));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    JS::Rooted<JSObject*> jsobj(aContext);
-    rv = wrapper->GetJSObject(jsobj.address());
-    NS_ENSURE_SUCCESS(rv, rv);
-    JS::Value wrappedVisit = OBJECT_TO_JSVAL(jsobj);
+    JS::Rooted<JSObject*> jsobj(aContext, wrapper->GetJSObject());
+    NS_ENSURE_STATE(jsobj);
+    JS::Rooted<JS::Value> wrappedVisit(aContext, OBJECT_TO_JSVAL(jsobj));
 
-    JSBool rc = JS_SetElement(aContext, visits, idx, &wrappedVisit);
+    JSBool rc = JS_SetElement(aContext, visits, idx, wrappedVisit.address());
     NS_ENSURE_TRUE(rc, NS_ERROR_UNEXPECTED);
   }
 

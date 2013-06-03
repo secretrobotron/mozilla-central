@@ -26,7 +26,6 @@
 
 static const WCHAR* kFirefoxExe = L"firefox.exe";
 static const WCHAR* kDefaultMetroBrowserIDPathKey = L"FirefoxURL";
-static const WCHAR* kDemoMetroBrowserIDPathKey = L"Mozilla.Firefox.URL";
 
 // Logging pipe handle
 HANDLE gTestOutputPipe = INVALID_HANDLE_VALUE;
@@ -131,10 +130,7 @@ static bool GetDefaultBrowserAppModelID(WCHAR* aIDBuffer,
   HKEY key;
   if (RegOpenKeyExW(HKEY_CLASSES_ROOT, kDefaultMetroBrowserIDPathKey,
                     0, KEY_READ, &key) != ERROR_SUCCESS) {
-    if (RegOpenKeyExW(HKEY_CLASSES_ROOT, kDemoMetroBrowserIDPathKey,
-                      0, KEY_READ, &key) != ERROR_SUCCESS) {
-      return false;
-    }
+    return false;
   }
   DWORD len = aCharLength * sizeof(WCHAR);
   memset(aIDBuffer, 0, len);
@@ -219,12 +215,15 @@ static bool Launch()
   }
   Log(L"App model id='%s'", appModelID);
 
-  // Hand off focus rights to the out-of-process activation server. Without
-  // this the metro interface won't launch.
-  hr = CoAllowSetForegroundWindow(activateMgr, NULL);
-  if (FAILED(hr)) {
-    Fail(L"CoAllowSetForegroundWindow result %X", hr);
-    return false;
+  // Hand off focus rights if the terminal has focus to the out-of-process
+  // activation server (explorer.exe). Without this the metro interface
+  // won't launch.
+  if (GetForegroundWindow() == GetConsoleWindow()) {
+    hr = CoAllowSetForegroundWindow(activateMgr, NULL);
+    if (FAILED(hr)) {
+      Fail(L"CoAllowSetForegroundWindow result %X", hr);
+      return false;
+    }
   }
 
   Log(L"Harness process id: %d", GetCurrentProcessId());

@@ -8,6 +8,8 @@
 #include "nsContentUtils.h"
 #include "nsPIDOMWindow.h"
 #include "mozilla/ErrorResult.h"
+#include "mozilla/dom/AudioContextBinding.h"
+#include "mozilla/dom/OfflineAudioContextBinding.h"
 #include "MediaStreamGraph.h"
 #include "mozilla/dom/AnalyserNode.h"
 #include "AudioDestinationNode.h"
@@ -23,13 +25,9 @@
 #include "ScriptProcessorNode.h"
 #include "ChannelMergerNode.h"
 #include "ChannelSplitterNode.h"
+#include "WaveShaperNode.h"
+#include "WaveTable.h"
 #include "nsNetUtil.h"
-
-// Note that this number is an arbitrary large value to protect against OOM
-// attacks.
-const unsigned MAX_SCRIPT_PROCESSOR_CHANNELS = 10000;
-const unsigned MAX_CHANNEL_SPLITTER_OUTPUTS = UINT16_MAX;
-const unsigned MAX_CHANNEL_MERGER_INPUTS = UINT16_MAX;
 
 namespace mozilla {
 namespace dom {
@@ -44,8 +42,16 @@ NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
 
 static uint8_t gWebAudioOutputKey;
 
-AudioContext::AudioContext(nsPIDOMWindow* aWindow)
-  : mDestination(new AudioDestinationNode(this, MediaStreamGraph::GetInstance()))
+AudioContext::AudioContext(nsPIDOMWindow* aWindow,
+                           bool aIsOffline,
+                           uint32_t aNumberOfChannels,
+                           uint32_t aLength,
+                           float aSampleRate)
+  : mSampleRate(aIsOffline ? aSampleRate : IdealAudioRate())
+  , mDestination(new AudioDestinationNode(this, aIsOffline,
+                                          aNumberOfChannels,
+                                          aLength, aSampleRate))
+  , mIsOffline(aIsOffline)
 {
   // Actually play audio
   mDestination->Stream()->AddAudioOutput(&gWebAudioOutputKey);
@@ -64,7 +70,11 @@ AudioContext::~AudioContext()
 JSObject*
 AudioContext::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return AudioContextBinding::Wrap(aCx, aScope, this);
+  if (mIsOffline) {
+    return OfflineAudioContextBinding::Wrap(aCx, aScope, this);
+  } else {
+    return AudioContextBinding::Wrap(aCx, aScope, this);
+  }
 }
 
 /* static */ already_AddRefed<AudioContext>
@@ -76,7 +86,39 @@ AudioContext::Constructor(const GlobalObject& aGlobal, ErrorResult& aRv)
     return nullptr;
   }
 
-  nsRefPtr<AudioContext> object = new AudioContext(window);
+  nsRefPtr<AudioContext> object = new AudioContext(window, false);
+  window->AddAudioContext(object);
+  return object.forget();
+}
+
+/* static */ already_AddRefed<AudioContext>
+AudioContext::Constructor(const GlobalObject& aGlobal,
+                          uint32_t aNumberOfChannels,
+                          uint32_t aLength,
+                          float aSampleRate,
+                          ErrorResult& aRv)
+{
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.Get());
+  if (!window) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
+  if (aNumberOfChannels == 0 ||
+      aNumberOfChannels > WebAudioUtils::MaxChannelCount ||
+      aLength == 0 ||
+      aSampleRate <= 1.0f ||
+      aSampleRate >= TRACK_RATE_MAX) {
+    // The DOM binding protects us against infinity and NaN
+    aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+    return nullptr;
+  }
+
+  nsRefPtr<AudioContext> object = new AudioContext(window,
+                                                   true,
+                                                   aNumberOfChannels,
+                                                   aLength,
+                                                   aSampleRate);
   window->AddAudioContext(object);
   return object.forget();
 }
@@ -95,8 +137,8 @@ AudioContext::CreateBuffer(JSContext* aJSContext, uint32_t aNumberOfChannels,
                            uint32_t aLength, float aSampleRate,
                            ErrorResult& aRv)
 {
-  if (aSampleRate < 8000 || aSampleRate > 96000) {
-    aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
+  if (aSampleRate < 8000 || aSampleRate > 96000 || !aLength) {
+    aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
     return nullptr;
   }
 
@@ -126,10 +168,10 @@ AudioContext::CreateBuffer(JSContext* aJSContext, ArrayBuffer& aBuffer,
                   aBuffer.Data(), aBuffer.Length(),
                   contentType);
 
-  WebAudioDecodeJob job(contentType, aBuffer, this);
+  WebAudioDecodeJob job(contentType, this);
 
   if (mDecoder.SyncDecodeMedia(contentType.get(),
-                               job.mBuffer, job.mLength, job) &&
+                               aBuffer.Data(), aBuffer.Length(), job) &&
       job.mOutput) {
     nsRefPtr<AudioBuffer> buffer = job.mOutput.forget();
     if (aMixToMono) {
@@ -167,9 +209,9 @@ AudioContext::CreateScriptProcessor(uint32_t aBufferSize,
                                     uint32_t aNumberOfOutputChannels,
                                     ErrorResult& aRv)
 {
-  if (aNumberOfInputChannels == 0 || aNumberOfOutputChannels == 0 ||
-      aNumberOfInputChannels > MAX_SCRIPT_PROCESSOR_CHANNELS ||
-      aNumberOfOutputChannels > MAX_SCRIPT_PROCESSOR_CHANNELS ||
+  if ((aNumberOfInputChannels == 0 && aNumberOfOutputChannels == 0) ||
+      aNumberOfInputChannels > WebAudioUtils::MaxChannelCount ||
+      aNumberOfOutputChannels > WebAudioUtils::MaxChannelCount ||
       !IsValidBufferSize(aBufferSize)) {
     aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
     return nullptr;
@@ -203,6 +245,13 @@ AudioContext::CreateGain()
   return gainNode.forget();
 }
 
+already_AddRefed<WaveShaperNode>
+AudioContext::CreateWaveShaper()
+{
+  nsRefPtr<WaveShaperNode> waveShaperNode = new WaveShaperNode(this);
+  return waveShaperNode.forget();
+}
+
 already_AddRefed<DelayNode>
 AudioContext::CreateDelay(double aMaxDelayTime, ErrorResult& aRv)
 {
@@ -226,7 +275,7 @@ already_AddRefed<ChannelSplitterNode>
 AudioContext::CreateChannelSplitter(uint32_t aNumberOfOutputs, ErrorResult& aRv)
 {
   if (aNumberOfOutputs == 0 ||
-      aNumberOfOutputs > MAX_CHANNEL_SPLITTER_OUTPUTS) {
+      aNumberOfOutputs > WebAudioUtils::MaxChannelCount) {
     aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
     return nullptr;
   }
@@ -240,7 +289,7 @@ already_AddRefed<ChannelMergerNode>
 AudioContext::CreateChannelMerger(uint32_t aNumberOfInputs, ErrorResult& aRv)
 {
   if (aNumberOfInputs == 0 ||
-      aNumberOfInputs > MAX_CHANNEL_MERGER_INPUTS) {
+      aNumberOfInputs > WebAudioUtils::MaxChannelCount) {
     aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
     return nullptr;
   }
@@ -264,6 +313,24 @@ AudioContext::CreateBiquadFilter()
   nsRefPtr<BiquadFilterNode> filterNode =
     new BiquadFilterNode(this);
   return filterNode.forget();
+}
+
+already_AddRefed<WaveTable>
+AudioContext::CreateWaveTable(const Float32Array& aRealData,
+                              const Float32Array& aImagData,
+                              ErrorResult& aRv)
+{
+  if (aRealData.Length() != aImagData.Length() ||
+      aRealData.Length() == 0 ||
+      aRealData.Length() > 4096) {
+    aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+    return nullptr;
+  }
+
+  nsRefPtr<WaveTable> waveTable =
+    new WaveTable(this, aRealData.Data(), aRealData.Length(),
+                  aImagData.Data(), aImagData.Length());
+  return waveTable.forget();
 }
 
 AudioListener*
@@ -292,10 +359,10 @@ AudioContext::DecodeAudioData(const ArrayBuffer& aBuffer,
     failureCallback = aFailureCallback.Value().get();
   }
   nsAutoPtr<WebAudioDecodeJob> job(
-    new WebAudioDecodeJob(contentType, aBuffer, this,
+    new WebAudioDecodeJob(contentType, this,
                           &aSuccessCallback, failureCallback));
   mDecoder.AsyncDecodeMedia(contentType.get(),
-                            job->mBuffer, job->mLength, *job);
+                            aBuffer.Data(), aBuffer.Length(), *job);
   // Transfer the ownership to mDecodeJobs
   mDecodeJobs.AppendElement(job.forget());
 }
@@ -388,7 +455,7 @@ AudioContext::Shutdown()
   GetHashtableElements(mAudioBufferSourceNodes, sourceNodes);
   for (uint32_t i = 0; i < sourceNodes.Length(); ++i) {
     ErrorResult rv;
-    sourceNodes[i]->Stop(0.0, rv);
+    sourceNodes[i]->Stop(0.0, rv, true);
   }
   // Stop all script processor nodes, to make sure that they release
   // their self-references.
@@ -396,6 +463,11 @@ AudioContext::Shutdown()
   GetHashtableElements(mScriptProcessorNodes, spNodes);
   for (uint32_t i = 0; i < spNodes.Length(); ++i) {
     spNodes[i]->Stop();
+  }
+
+  // For offline contexts, we can destroy the MediaStreamGraph at this point.
+  if (mIsOffline) {
+    mDestination->DestroyGraph();
   }
 }
 
@@ -432,6 +504,14 @@ AudioContext::GetJSContext() const
     return nullptr;
   }
   return scriptContext->GetNativeContext();
+}
+
+void
+AudioContext::StartRendering()
+{
+  MOZ_ASSERT(mIsOffline, "This should only be called on OfflineAudioContext");
+
+  mDestination->StartRendering();
 }
 
 }

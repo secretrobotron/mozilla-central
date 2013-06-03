@@ -205,7 +205,8 @@ nsXULPrototypeCache::GetScript(nsIURI* aURI)
 }
 
 nsresult
-nsXULPrototypeCache::PutScript(nsIURI* aURI, JSScript* aScriptObject)
+nsXULPrototypeCache::PutScript(nsIURI* aURI,
+                               JS::Handle<JSScript*> aScriptObject)
 {
     CacheScriptEntry existingEntry;
     if (mScriptTable.Get(aURI, &existingEntry)) {
@@ -660,7 +661,7 @@ static PLDHashOperator
 MarkScriptsInGC(nsIURI* aKey, CacheScriptEntry& aScriptEntry, void* aClosure)
 {
     JSTracer* trc = static_cast<JSTracer*>(aClosure);
-    JS_CallScriptTracer(trc, aScriptEntry.mScriptObject,
+    JS_CallScriptTracer(trc, &aScriptEntry.mScriptObject,
                         "nsXULPrototypeCache script");
     return PL_DHASH_NEXT;
 }

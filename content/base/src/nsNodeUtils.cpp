@@ -6,6 +6,7 @@
 
 #include "nsNodeUtils.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsINode.h"
 #include "nsIContent.h"
 #include "mozilla/dom/Element.h"
@@ -513,7 +514,7 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
         olc->NotifyOwnerDocumentActivityChanged();
       }
     }
- 
+
     if (oldDoc != newDoc && oldDoc->MayHaveDOMMutationObservers()) {
       newDoc->SetMayHaveDOMMutationObservers();
     }

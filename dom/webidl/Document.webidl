@@ -15,7 +15,6 @@
  * http://mxr.mozilla.org/mozilla-central/source/dom/interfaces/core/nsIDOMDocument.idl
  */
 
-interface Comment;
 interface StyleSheetList;
 interface TouchList;
 interface WindowProxy;
@@ -315,6 +314,9 @@ partial interface Document {
   TouchList createTouchList();
   [Creator, Func="nsGenericHTMLElement::TouchEventsEnabled"]
   TouchList createTouchList(sequence<Touch> touches);
+
+  [ChromeOnly]
+  attribute boolean styleSheetChangeEventsEnabled;
 };
 
 Document implements XPathEvaluator;

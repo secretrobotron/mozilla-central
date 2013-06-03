@@ -271,6 +271,9 @@ LayerManagerComposite::Render()
     return;
   }
 
+  
+  mCompositor->GetWidget()->PreRender(this);
+
   nsIntRect clipRect;
   Rect bounds(mRenderBounds.x, mRenderBounds.y, mRenderBounds.width, mRenderBounds.height);
   Rect actualBounds;
@@ -655,6 +658,7 @@ LayerComposite::LayerComposite(LayerManagerComposite *aManager)
   , mCompositor(aManager->GetCompositor())
   , mShadowOpacity(1.0)
   , mUseShadowClipRect(false)
+  , mShadowTransformSetByAnimation(false)
   , mDestroyed(false)
 { }
 

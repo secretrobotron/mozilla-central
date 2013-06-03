@@ -43,7 +43,6 @@
 #include "vm/StringBuffer.h"
 
 #include "jsatominlines.h"
-#include "jsnuminlines.h"
 #include "jsobjinlines.h"
 
 #include "vm/NumberObject-inl.h"
@@ -175,6 +174,24 @@ ComputeAccurateBinaryBaseInteger(const jschar *start, const jschar *end, int bas
     return value;
 }
 
+double
+js::ParseDecimalNumber(const JS::TwoByteChars chars)
+{
+    MOZ_ASSERT(chars.length() > 0);
+    uint64_t dec = 0;
+    RangedPtr<jschar> s = chars.start(), end = chars.end();
+    do {
+        jschar c = *s;
+        MOZ_ASSERT('0' <= c && c <= '9');
+        uint8_t digit = c - '0';
+        uint64_t next = dec * 10 + digit;
+        MOZ_ASSERT(next < DOUBLE_INTEGRAL_PRECISION_LIMIT,
+                   "next value won't be an integrally-precise double");
+        dec = next;
+    } while (++s < end);
+    return static_cast<double>(dec);
+}
+
 bool
 js::GetPrefixInteger(JSContext *cx, const jschar *start, const jschar *end, int base,
                      const jschar **endp, double *dp)
@@ -230,7 +247,7 @@ num_isNaN(JSContext *cx, unsigned argc, Value *vp)
     double x;
     if (!ToNumber(cx, vp[2], &x))
         return false;
-    vp->setBoolean(MOZ_DOUBLE_IS_NaN(x));
+    vp->setBoolean(mozilla::IsNaN(x));
     return JS_TRUE;
 }
 
@@ -244,7 +261,7 @@ num_isFinite(JSContext *cx, unsigned argc, Value *vp)
     double x;
     if (!ToNumber(cx, vp[2], &x))
         return JS_FALSE;
-    vp->setBoolean(MOZ_DOUBLE_IS_FINITE(x));
+    vp->setBoolean(mozilla::IsFinite(x));
     return JS_TRUE;
 }
 
@@ -911,7 +928,7 @@ Number_isNaN(JSContext *cx, unsigned argc, Value *vp)
         args.rval().setBoolean(false);
         return true;
     }
-    args.rval().setBoolean(MOZ_DOUBLE_IS_NaN(args[0].toDouble()));
+    args.rval().setBoolean(mozilla::IsNaN(args[0].toDouble()));
     return true;
 }
 
@@ -925,7 +942,7 @@ Number_isFinite(JSContext *cx, unsigned argc, Value *vp)
         return true;
     }
     args.rval().setBoolean(args[0].isInt32() ||
-                           MOZ_DOUBLE_IS_FINITE(args[0].toDouble()));
+                           mozilla::IsFinite(args[0].toDouble()));
     return true;
 }
 
@@ -940,7 +957,7 @@ Number_isInteger(JSContext *cx, unsigned argc, Value *vp)
     }
     Value val = args[0];
     args.rval().setBoolean(val.isInt32() ||
-                           (MOZ_DOUBLE_IS_FINITE(val.toDouble()) &&
+                           (mozilla::IsFinite(val.toDouble()) &&
                             ToInteger(val.toDouble()) == val.toDouble()));
     return true;
 }
@@ -1031,19 +1048,19 @@ js::InitRuntimeNumberState(JSRuntime *rt)
      * Our NaN must be one particular canonical value, because we rely on NaN
      * encoding for our value representation.  See Value.h.
      */
-    d = MOZ_DOUBLE_SPECIFIC_NaN(0, 0x8000000000000ULL);
+    d = mozilla::SpecificNaN(0, 0x8000000000000ULL);
     number_constants[NC_NaN].dval = js_NaN = d;
     rt->NaNValue.setDouble(d);
 
-    d = MOZ_DOUBLE_POSITIVE_INFINITY();
+    d = mozilla::PositiveInfinity();
     number_constants[NC_POSITIVE_INFINITY].dval = js_PositiveInfinity = d;
     rt->positiveInfinityValue.setDouble(d);
 
-    d = MOZ_DOUBLE_NEGATIVE_INFINITY();
+    d = mozilla::NegativeInfinity();
     number_constants[NC_NEGATIVE_INFINITY].dval = js_NegativeInfinity = d;
     rt->negativeInfinityValue.setDouble(d);
 
-    number_constants[NC_MIN_VALUE].dval = MOZ_DOUBLE_MIN_VALUE();
+    number_constants[NC_MIN_VALUE].dval = mozilla::MinDoubleValue();
 
     // XXX If ENABLE_INTL_API becomes true all the time at some point,
     //     js::InitRuntimeNumberState is no longer fallible, and we should
@@ -1171,7 +1188,7 @@ FracNumberToCString(JSContext *cx, ToCStringBuf *cbuf, double d, int base = 10)
 #ifdef DEBUG
     {
         int32_t _;
-        JS_ASSERT(!MOZ_DOUBLE_IS_INT32(d, &_));
+        JS_ASSERT(!mozilla::DoubleIsInt32(d, &_));
     }
 #endif
 
@@ -1199,7 +1216,7 @@ char *
 js::NumberToCString(JSContext *cx, ToCStringBuf *cbuf, double d, int base/* = 10*/)
 {
     int32_t i;
-    return MOZ_DOUBLE_IS_INT32(d, &i)
+    return mozilla::DoubleIsInt32(d, &i)
            ? IntToCString(cbuf, i, base)
            : FracNumberToCString(cx, cbuf, d, base);
 }
@@ -1222,7 +1239,7 @@ js_NumberToStringWithBase(JSContext *cx, double d, int base)
     JSCompartment *c = cx->compartment;
 
     int32_t i;
-    if (MOZ_DOUBLE_IS_INT32(d, &i)) {
+    if (mozilla::DoubleIsInt32(d, &i)) {
         if (base == 10 && StaticStrings::hasInt(i))
             return cx->runtime->staticStrings.getInt(i);
         if (unsigned(i) < unsigned(base)) {
@@ -1331,6 +1348,68 @@ js::NumberValueToStringBuffer(JSContext *cx, const Value &v, StringBuffer &sb)
     return sb.appendInflated(cstr, cstrlen);
 }
 
+static bool
+StringToNumber(JSContext *cx, JSString *str, double *result)
+{
+    size_t length = str->length();
+    const jschar *chars = str->getChars(NULL);
+    if (!chars)
+        return false;
+
+    if (length == 1) {
+        jschar c = chars[0];
+        if ('0' <= c && c <= '9') {
+            *result = c - '0';
+            return true;
+        }
+        if (unicode::IsSpace(c)) {
+            *result = 0.0;
+            return true;
+        }
+        *result = js_NaN;
+        return true;
+    }
+
+    const jschar *end = chars + length;
+    const jschar *bp = SkipSpace(chars, end);
+
+    /* ECMA doesn't allow signed hex numbers (bug 273467). */
+    if (end - bp >= 2 && bp[0] == '0' && (bp[1] == 'x' || bp[1] == 'X')) {
+        /*
+         * It's probably a hex number.  Accept if there's at least one hex
+         * digit after the 0x, and if no non-whitespace characters follow all
+         * the hex digits.
+         */
+        const jschar *endptr;
+        double d;
+        if (!GetPrefixInteger(cx, bp + 2, end, 16, &endptr, &d) ||
+            endptr == bp + 2 ||
+            SkipSpace(endptr, end) != end)
+        {
+            *result = js_NaN;
+            return true;
+        }
+        *result = d;
+        return true;
+    }
+
+    /*
+     * Note that ECMA doesn't treat a string beginning with a '0' as
+     * an octal number here. This works because all such numbers will
+     * be interpreted as decimal by js_strtod.  Also, any hex numbers
+     * that have made it here (which can only be negative ones) will
+     * be treated as 0 without consuming the 'x' by js_strtod.
+     */
+    const jschar *ep;
+    double d;
+    if (!js_strtod(cx, bp, end, &ep, &d) || SkipSpace(ep, end) != end) {
+        *result = js_NaN;
+        return true;
+    }
+    *result = d;
+    return true;
+}
+
 #if defined(_MSC_VER)
 # pragma optimize("g", off)
 #endif
@@ -1365,7 +1444,7 @@ js::ToNumberSlow(JSContext *cx, Value v, double *out)
         }
       skip_int_double:
         if (v.isString())
-            return StringToNumberType<double>(cx, v.toString(), out);
+            return StringToNumber(cx, v.toString(), out);
         if (v.isBoolean()) {
             if (v.toBoolean()) {
                 *out = 1.0;
@@ -1476,7 +1555,7 @@ js::ToUint16Slow(JSContext *cx, const Value &v, uint16_t *out)
         return false;
     }
 
-    if (d == 0 || !MOZ_DOUBLE_IS_FINITE(d)) {
+    if (d == 0 || !mozilla::IsFinite(d)) {
         *out = 0;
         return true;
     }

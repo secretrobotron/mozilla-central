@@ -10,6 +10,7 @@
 #include "jsnum.h"
 
 #include "CodeGenerator-arm.h"
+#include "ion/PerfSpewer.h"
 #include "ion/CodeGenerator.h"
 #include "ion/IonCompartment.h"
 #include "ion/IonFrames.h"
@@ -205,11 +206,11 @@ CodeGeneratorARM::bailoutFrom(Label *label, LSnapshot *snapshot)
     CompileInfo &info = snapshot->mir()->block()->info();
     switch (info.executionMode()) {
       case ParallelExecution: {
-        // In parallel mode, make no attempt to recover, just signal an error.
-        Label *ool;
-        if (!ensureOutOfLineParallelAbort(&ool))
-            return false;
-        masm.retarget(label, ool);
+        // in parallel mode, make no attempt to recover, just signal an error.
+        OutOfLineParallelAbort *ool = oolParallelAbort(ParallelBailoutUnsupported,
+                                                       snapshot->mir()->block(),
+                                                       snapshot->mir()->pc());
+        masm.retarget(label, ool->entry());
         return true;
       }
       case SequentialExecution:

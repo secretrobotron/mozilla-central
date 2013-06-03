@@ -134,6 +134,16 @@ SVGTransformableElement::SetAnimateMotionTransform(const gfxMatrix* aMatrix)
   }
   mAnimateMotionTransform = aMatrix ? new gfxMatrix(*aMatrix) : nullptr;
   DidAnimateTransformList();
+  nsIFrame* frame = GetPrimaryFrame();
+  if (frame) {
+    // If the result of this transform and any other transforms on this frame
+    // is the identity matrix, then DoApplyRenderingChangeToTree won't handle
+    // our nsChangeHint_UpdateTransformLayer hint since aFrame->IsTransformed()
+    // will return false. That's fine, but we still need to schedule a repaint,
+    // and that won't otherwise happen. Since it's cheap to call SchedulePaint,
+    // we don't bother to check IsTransformed().
+    frame->SchedulePaint();
+  }
 }
 
 nsSVGAnimatedTransformList*
@@ -173,7 +183,7 @@ SVGTransformableElement::GetBBox(ErrorResult& rv)
     return nullptr;
   }
 
-  return NS_NewSVGRect(nsSVGUtils::GetBBox(frame));
+  return NS_NewSVGRect(this, nsSVGUtils::GetBBox(frame));
 }
 
 already_AddRefed<SVGMatrix>

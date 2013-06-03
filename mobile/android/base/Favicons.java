@@ -19,7 +19,6 @@ import org.apache.http.entity.BufferedHttpEntity;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.net.http.AndroidHttpClient;
 import android.os.Handler;
 import android.support.v4.util.LruCache;
@@ -52,7 +51,7 @@ public class Favicons {
     private LruCache<String, Bitmap> mFaviconsCache;
     private LruCache<String, Long> mFailedCache;
     private LruCache<String, Integer> mColorCache;
-    private static final String USER_AGENT = GeckoApp.mAppContext.getDefaultUAString();
+    private static final String USER_AGENT = GeckoAppShell.getGeckoInterface().getDefaultUAString();
     private AndroidHttpClient mHttpClient;
 
     public interface OnFaviconLoadedListener {
@@ -329,7 +328,8 @@ public class Favicons {
 
                 BufferedHttpEntity bufferedEntity = new BufferedHttpEntity(entity);
                 InputStream contentStream = bufferedEntity.getContent();
-                image = BitmapFactory.decodeStream(contentStream);
+                image = BitmapUtils.decodeStream(contentStream);
+                contentStream.close();
             } catch (Exception e) {
                 Log.e(LOGTAG, "Error reading favicon", e);
             }

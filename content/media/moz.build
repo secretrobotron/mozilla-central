@@ -89,6 +89,7 @@ CPP_SOURCES += [
     'AudioAvailableEventManager.cpp',
     'AudioChannelFormat.cpp',
     'AudioNodeEngine.cpp',
+    'AudioNodeExternalInputStream.cpp',
     'AudioNodeStream.cpp',
     'AudioSegment.cpp',
     'AudioStream.cpp',

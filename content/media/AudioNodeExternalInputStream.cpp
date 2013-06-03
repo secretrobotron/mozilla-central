@@ -40,6 +40,12 @@ AudioNodeExternalInputStream::~AudioNodeExternalInputStream()
   }
 }
 
+AudioChunk*
+AudioNodeExternalInputStream::GetNextOutputChunk()
+{
+  return mNextOutputChunk;
+}
+
 AudioNodeExternalInputStream::TrackMapEntry*
 AudioNodeExternalInputStream::GetTrackMap(StreamBuffer::Track* aTrack)
 {

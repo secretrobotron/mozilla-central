@@ -57,6 +57,8 @@ private:
 
   uint32_t mOutputIndex;
 
+  AudioChunk* mNextOutputChunk;
+
   // The engine that will generate output for this node.
   nsAutoPtr<AudioNodeEngine> mEngine;
 

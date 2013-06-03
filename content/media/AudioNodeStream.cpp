@@ -7,6 +7,7 @@
 
 #include "MediaStreamGraphImpl.h"
 #include "AudioNodeEngine.h"
+#include "AudioNodeExternalInputStream.h"
 #include "ThreeDPoint.h"
 
 using namespace mozilla::dom;
@@ -277,20 +278,21 @@ AudioNodeStream::ObtainInputBlock(AudioChunk& aTmpChunk, uint32_t aPortIndex)
     }
     MediaStream* s = mInputs[i]->GetSource();
     AudioNodeStream* a = static_cast<AudioNodeStream*>(s);
-    AudioNodeExternalInputStream audioNodeExternalInputStream = static_cast<AudioNodeExternalInputStream*>(s);
+    AudioNodeExternalInputStream* audioNodeExternalInputStream = static_cast<AudioNodeExternalInputStream*>(s);
+    AudioChunk* chunk;
+
     if (a == s->AsAudioNodeStream()) {
       if (a->IsFinishedOnGraphThread() ||
           a->IsAudioParamStream()) {
         continue;
       }
-      AudioChunk* chunk = &a->mLastChunks[mInputs[i]->OutputNumber()];
+      chunk = &a->mLastChunks[mInputs[i]->OutputNumber()];
     }
-    else if () {
-      if (audioNodeExternalInputStream->IsFinishedOnGraphThread() ||
-          audioNodeExternalInputStream->IsAudioParamStream()) {
+    else if (audioNodeExternalInputStream == s->AsAudioNodeExternalInputStream()) {
+      if (audioNodeExternalInputStream->IsFinishedOnGraphThread()) {
         continue;
       }
-      AudioChunk* chunk = &audioNodeExternalInputStream->mLastChunks[mInputs[i]->OutputNumber()];
+      chunk = audioNodeExternalInputStream->GetNextOutputChunk();
     }
     else {
       MOZ_ASSERT(false, "Not a valid input audio node stream.");

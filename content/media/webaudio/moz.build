@@ -60,6 +60,7 @@ CPP_SOURCES += [
     'EnableWebAudioCheck.cpp',
     'GainNode.cpp',
     'MediaBufferDecoder.cpp',
+    'MediaStreamAudioSourceNode.cpp',
     'OfflineAudioCompletionEvent.cpp',
     'PannerNode.cpp',
     'ScriptProcessorNode.cpp',

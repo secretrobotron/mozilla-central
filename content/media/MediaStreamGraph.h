@@ -361,6 +361,7 @@ public:
   virtual SourceMediaStream* AsSourceStream() { return nullptr; }
   virtual ProcessedMediaStream* AsProcessedStream() { return nullptr; }
   virtual AudioNodeStream* AsAudioNodeStream() { return nullptr; }
+  virtual AudioNodeExternalInputStream* AsAudioNodeExternalInputStream() { return nullptr; }
 
   // media graph thread only
   void Init();
@@ -938,8 +939,7 @@ public:
                                          AudioNodeStreamKind aKind);
 
   AudioNodeExternalInputStream*
-  CreateAudioNodeExternalInputStream(AudioNodeEngine* aEngine,
-                                     AudioNodeStreamKind aKind);
+  CreateAudioNodeExternalInputStream(AudioNodeEngine* aEngine);
   /**
    * Returns the number of graph updates sent. This can be used to track
    * whether a given update has been processed by the graph thread and reflected

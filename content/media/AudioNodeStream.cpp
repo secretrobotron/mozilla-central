@@ -249,12 +249,25 @@ AudioNodeStream::ObtainInputBlock(AudioChunk& aTmpChunk, uint32_t aPortIndex)
     }
     MediaStream* s = mInputs[i]->GetSource();
     AudioNodeStream* a = static_cast<AudioNodeStream*>(s);
-    MOZ_ASSERT(a == s->AsAudioNodeStream());
-    if (a->IsFinishedOnGraphThread() ||
-        a->IsAudioParamStream()) {
-      continue;
+    AudioNodeExternalInputStream audioNodeExternalInputStream = static_cast<AudioNodeExternalInputStream*>(s);
+    if (a == s->AsAudioNodeStream()) {
+      if (a->IsFinishedOnGraphThread() ||
+          a->IsAudioParamStream()) {
+        continue;
+      }
+      AudioChunk* chunk = &a->mLastChunks[mInputs[i]->OutputNumber()];
     }
-    AudioChunk* chunk = &a->mLastChunks[mInputs[i]->OutputNumber()];
+    else if () {
+      if (audioNodeExternalInputStream->IsFinishedOnGraphThread() ||
+          audioNodeExternalInputStream->IsAudioParamStream()) {
+        continue;
+      }
+      AudioChunk* chunk = &audioNodeExternalInputStream->mLastChunks[mInputs[i]->OutputNumber()];
+    }
+    else {
+      MOZ_ASSERT(false, "Not a valid input audio node stream.");
+    }
+
     MOZ_ASSERT(chunk);
     if (chunk->IsNull()) {
       continue;

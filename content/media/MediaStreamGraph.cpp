@@ -2055,11 +2055,9 @@ MediaStreamGraph::CreateTrackUnionStream(DOMMediaStream* aWrapper)
 }
 
 AudioNodeExternalInputStream*
-MediaStreamGraph::CreateAudioNodeExternalInputStream(AudioNodeEngine* aEngine,
-                                                     AudioNodeStreamKind aKind)
+MediaStreamGraph::CreateAudioNodeExternalInputStream(AudioNodeEngine* aEngine)
 {
-  AudioNodeExternalInputStream* stream = new AudioNodeExternalInputStream(aEngine,
-                                                                          aKind);
+  AudioNodeExternalInputStream* stream = new AudioNodeExternalInputStream(aEngine);
   NS_ADDREF(stream);
   MediaStreamGraphImpl* graph = static_cast<MediaStreamGraphImpl*>(this);
   stream->SetGraphImpl(graph);

@@ -1892,6 +1892,13 @@ nsXPConnect::AfterProcessNextEvent(nsIThreadInternal *aThread,
     nsDOMMutationObserver::HandleMutations();
 
     PopJSContext();
+
+    // If the cx stack is empty, that means we're at the an un-nested event
+    // loop. This is a good time to make changes to debug mode.
+    if (XPCJSRuntime::Get()->GetJSContextStack()->Count() == 0) {
+        MOZ_ASSERT(mEventDepth == 0);
+        CheckForDebugMode(XPCJSRuntime::Get()->GetJSRuntime());
+    }
     return NS_OK;
 }
 
@@ -1974,18 +1981,7 @@ nsXPConnect::CheckForDebugMode(JSRuntime *rt)
     if (!NS_IsMainThread())
         MOZ_CRASH();
 
-    // We really want to use an AutoSafeJSContext here. Unfortunately, that
-    // pushes, and this function is called during the pushing procedure, so
-    // doing that would result in infinite recursion.
-    //
-    // The only thing we need this cx for is the call to
-    // JS_SetDebugModeForAllCompartments, and the worst _that_ function seems
-    // to do is to report an error in one case. So it's probably ok to just use
-    // the SafeJSContext without pushing for now, especially since both JSD and
-    // cx pushing are not long for this earth.
-    JSContext *unpushedCx = XPCJSRuntime::Get()->GetJSContextStack()
-                                               ->GetSafeJSContext();
-
+    AutoSafeJSContext cx;
     JS_SetRuntimeDebugMode(rt, gDesiredDebugMode);
 
     nsresult rv;
@@ -1995,7 +1991,7 @@ nsXPConnect::CheckForDebugMode(JSRuntime *rt)
         goto fail;
     }
 
-    if (!JS_SetDebugModeForAllCompartments(unpushedCx, gDesiredDebugMode))
+    if (!JS_SetDebugModeForAllCompartments(cx, gDesiredDebugMode))
         goto fail;
 
     if (gDesiredDebugMode) {
@@ -2055,28 +2051,6 @@ namespace xpc {
 bool
 PushJSContext(JSContext *aCx)
 {
-    // JSD mumbo jumbo.
-    nsXPConnect *xpc = nsXPConnect::XPConnect();
-    JSRuntime *rt = XPCJSRuntime::Get()->GetJSRuntime();
-    if (xpc::gDebugMode != xpc::gDesiredDebugMode) {
-        if (!xpc::gDesiredDebugMode) {
-            /* Turn off debug mode immediately, even if JS code is currently
-               running. */
-            xpc->CheckForDebugMode(rt);
-        } else {
-            bool runningJS = false;
-            XPCJSContextStack *stack = XPCJSRuntime::Get()->GetJSContextStack();
-            for (uint32_t i = 0; i < stack->Count(); ++i) {
-                JSContext *cx = (*stack->GetStack())[i].cx;
-                if (cx && js::IsContextRunningJS(cx)) {
-                    runningJS = true;
-                    break;
-                }
-            }
-            if (!runningJS)
-                xpc->CheckForDebugMode(rt);
-        }
-    }
     return XPCJSRuntime::Get()->GetJSContextStack()->Push(aCx);
 }
 

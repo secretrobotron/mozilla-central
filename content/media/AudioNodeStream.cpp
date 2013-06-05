@@ -278,16 +278,9 @@ AudioNodeStream::ObtainInputBlock(AudioChunk& aTmpChunk, uint32_t aPortIndex)
     }
     MediaStream* s = mInputs[i]->GetSource();
     AudioNodeStream* a = static_cast<AudioNodeStream*>(s);
-    AudioNodeExternalInputStream* audioNodeExternalInputStream = static_cast<AudioNodeExternalInputStream*>(s);
     AudioChunk* chunk;
 
-    if (audioNodeExternalInputStream == s->AsAudioNodeExternalInputStream()) {
-      if (audioNodeExternalInputStream->IsFinishedOnGraphThread()) {
-        continue;
-      }
-      chunk = audioNodeExternalInputStream->GetNextOutputChunk();
-    }
-    else if (a == s->AsAudioNodeStream()) {
+    if (a == s->AsAudioNodeStream()) {
       if (a->IsFinishedOnGraphThread() ||
           a->IsAudioParamStream()) {
         continue;
@@ -414,10 +407,6 @@ AudioNodeStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
     FinishOutput();
   }
 
-  StreamBuffer::Track* track = EnsureTrack();
-
-  AudioSegment* segment = track->Get<AudioSegment>();
-
   uint16_t outputCount = std::max(uint16_t(1), mEngine->OutputCount());
   mLastChunks.SetLength(outputCount);
 
@@ -448,6 +437,15 @@ AudioNodeStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
       mMarkAsFinishedAfterThisBlock = true;
     }
   }
+
+  AdvanceOutputSegment();
+}
+
+void
+AudioNodeStream::AdvanceOutputSegment()
+{
+  StreamBuffer::Track* track = EnsureTrack();
+  AudioSegment* segment = track->Get<AudioSegment>();
 
   if (mKind == MediaStreamGraph::EXTERNAL_STREAM) {
     segment->AppendAndConsumeChunk(&mLastChunks[0]);

@@ -24,21 +24,15 @@ typedef struct SpeexResamplerState_ SpeexResamplerState;
 
 namespace mozilla {
 
-class AudioNodeExternalInputStream : public ProcessedMediaStream {
+class AudioNodeExternalInputStream : public AudioNodeStream {
 public:
 
   AudioNodeExternalInputStream(AudioNodeEngine* aEngine);
-
   ~AudioNodeExternalInputStream();
 
-  virtual void ProduceOutput(GraphTime aFrom, GraphTime aTo);
-
   virtual AudioNodeExternalInputStream* AsAudioNodeExternalInputStream() { return this; }
-
-  // Any thread
-  AudioNodeEngine* Engine() { return mEngine; }
-
   AudioChunk* GetNextOutputChunk() { return &mNextOutputChunk; }
+  virtual void ProduceOutput(GraphTime aFrom, GraphTime aTo);
 
 private:
   struct TrackMapEntry {
@@ -53,22 +47,14 @@ private:
   };
 
   uint32_t mLastChunkOffset;
-
-  std::deque<AudioChunk> mOutputChunkQueue;
-
   AudioChunk mNextOutputChunk;
-
-  // The engine that will generate output for this node.
-  nsAutoPtr<AudioNodeEngine> mEngine;
-
-  StreamBuffer::Track* EnsureTrack();
-
-  void FinalizeProducedOutput();
-
+  std::deque<AudioChunk> mOutputChunkQueue;
   nsTArray<TrackMapEntry> mTrackMap;
 
+  void ConsumeInputData(const StreamBuffer::Track& aInputTrack,
+                        AudioNodeExternalInputStream::ChunkMetaData& aChunkMetaData);
   TrackMapEntry* GetTrackMap(const StreamBuffer::Track& aTrack);
-
+  bool PrepareOutputChunkQueue(AudioNodeExternalInputStream::ChunkMetaData& aChunkMetaData);
   void WriteToCurrentChunk(SpeexResamplerState* resampler,
                            TrackRate aInputRate,
                            const AudioChunk& aInputChunk,
@@ -76,11 +62,6 @@ private:
                            uint32_t aOutputOffset,
                            uint32_t& aActualIntputSamples,
                            uint32_t& aActualOutputSamples);
-
-  void ConsumeInputData(const StreamBuffer::Track& aInputTrack,
-                        AudioNodeExternalInputStream::ChunkMetaData& aChunkMetaData);
-
-  bool PrepareOutputChunkQueue(AudioNodeExternalInputStream::ChunkMetaData& aChunkMetaData);
 };
 
 }

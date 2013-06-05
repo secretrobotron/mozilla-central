@@ -10,21 +10,13 @@
 
 using namespace mozilla::dom;
 
-static const int MAX_QUEUE_LENGTH = 10;
-
-/**
- * An AudioNodeStream produces a single audio track with ID
- * AUDIO_NODE_STREAM_TRACK_ID. This track has rate IdealAudioRate().
- * Each chunk in the track is a single block of WEBAUDIO_BLOCK_SIZE samples.
- */
-static const int AUDIO_NODE_STREAM_TRACK_ID = 1;
+static const int MAX_QUEUE_LENGTH = 500;
 
 namespace mozilla {
 
 AudioNodeExternalInputStream::AudioNodeExternalInputStream(AudioNodeEngine* aEngine)
-    : ProcessedMediaStream(nullptr),
-      mLastChunkOffset(0),
-      mEngine(aEngine)
+    : AudioNodeStream(aEngine, MediaStreamGraph::INTERNAL_STREAM, IdealAudioRate()),
+      mLastChunkOffset(0)
 {
 }
 
@@ -108,7 +100,7 @@ AudioNodeExternalInputStream::WriteToCurrentChunk(SpeexResamplerState* aResample
                                   inputData, &in,
                                   outputData, &out);
 
-      for (uint32_t k = outputSamples; k < outputSamples + out; ++k) {
+      for (uint32_t k = aOutputOffset; k < aOutputOffset + out; ++k) {
         finalData[k] += AudioSampleToFloat(outputData[k]);
       }
     }
@@ -119,7 +111,7 @@ AudioNodeExternalInputStream::WriteToCurrentChunk(SpeexResamplerState* aResample
                                     inputData, &in,
                                     outputData, &out);
       
-      for (uint32_t k = outputSamples; k < outputSamples + out; ++k) {
+      for (uint32_t k = aOutputOffset; k < aOutputOffset + out; ++k) {
         finalData[k] += outputData[k];
       }
     }
@@ -129,7 +121,7 @@ AudioNodeExternalInputStream::WriteToCurrentChunk(SpeexResamplerState* aResample
       // printf("input: %d => %d\toutput: %d => %d\n",
       //   inputSamples, in, outputSamples, out);
       aActualOutputSamples = out;
-      aActualOutputSamples = in;
+      aActualIntputSamples = in;
     }
   }
 }
@@ -137,18 +129,13 @@ AudioNodeExternalInputStream::WriteToCurrentChunk(SpeexResamplerState* aResample
 bool
 AudioNodeExternalInputStream::PrepareOutputChunkQueue(AudioNodeExternalInputStream::ChunkMetaData& aChunkMetaData)
 {
-  if (mOutputChunkQueue.size() == 0) {
-    AudioChunk tmpChunk;
-    mOutputChunkQueue.push_front(tmpChunk);
-  }
-
   if (aChunkMetaData.mOffset == WEBAUDIO_BLOCK_SIZE) {
-    if (aChunkMetaData.mIndex == MAX_QUEUE_LENGTH - 1) {
-      return false;
-    }
     if (aChunkMetaData.mIndex == mOutputChunkQueue.size() - 1) {
+      if (mOutputChunkQueue.size() == MAX_QUEUE_LENGTH) {
+        return false;
+      }
       AudioChunk tmpChunk;
-      mOutputChunkQueue.push_front(tmpChunk);
+      mOutputChunkQueue.push_back(tmpChunk);
     }
     ++aChunkMetaData.mIndex;
     aChunkMetaData.mOffset = 0;
@@ -166,6 +153,7 @@ AudioNodeExternalInputStream::ConsumeInputData(const StreamBuffer::Track& aInput
   SpeexResamplerState* resampler = trackMap->mResampler;
 
   AudioSegment tmpSegment;
+  if (trackMap->mLastTick > aInputTrack.GetEnd()) { return; }
   tmpSegment.AppendSlice(inputSegment, trackMap->mLastTick, aInputTrack.GetEnd());
 
   AudioSegment::ChunkIterator ci(tmpSegment);
@@ -214,10 +202,21 @@ AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
 {
   MOZ_ASSERT(mInputs.Length() == 1);
 
+  uint16_t outputCount = std::max(uint16_t(1), mEngine->OutputCount());
+  mLastChunks.SetLength(outputCount);
+
   if (mOutputChunkQueue.size() < MAX_QUEUE_LENGTH) {
     AudioNodeExternalInputStream::ChunkMetaData lastChunkMetaData;
-    lastChunkMetaData.mIndex = mOutputChunkQueue.size() == 0 ? 0 : mOutputChunkQueue.size() - 1;
-    lastChunkMetaData.mOffset = mLastChunkOffset;
+    if (mOutputChunkQueue.empty()) {
+      AudioChunk tmpChunk;
+      mOutputChunkQueue.push_back(tmpChunk);
+      lastChunkMetaData.mIndex = 0;
+      lastChunkMetaData.mOffset = 0;
+    }
+    else {
+      lastChunkMetaData.mIndex = mOutputChunkQueue.size() - 1;
+      lastChunkMetaData.mOffset = mLastChunkOffset;      
+    }
 
     AudioNodeExternalInputStream::ChunkMetaData maxChunkMetaData = lastChunkMetaData;
 
@@ -237,54 +236,19 @@ AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
     mLastChunkOffset = maxChunkMetaData.mOffset;
   }
 
-  FinalizeProducedOutput();
-  mBuffer.AdvanceKnownTracksTime(GraphTimeToStreamTime(aTo));
-}
-
-StreamBuffer::Track*
-AudioNodeExternalInputStream::EnsureTrack()
-{
-  StreamBuffer::Track* track = mBuffer.FindTrack(AUDIO_NODE_STREAM_TRACK_ID);
-  if (!track) {
-    nsAutoPtr<MediaSegment> segment(new AudioSegment());
-    for (uint32_t j = 0; j < mListeners.Length(); ++j) {
-      MediaStreamListener* l = mListeners[j];
-      l->NotifyQueuedTrackChanges(Graph(), AUDIO_NODE_STREAM_TRACK_ID, IdealAudioRate(), 0,
-                                  MediaStreamListener::TRACK_EVENT_CREATED,
-                                  *segment);
+  if (!mOutputChunkQueue.empty()) {
+    mLastChunks[0] = mOutputChunkQueue.front();
+    if (mLastChunks[0].IsNull()) {
+      printf("WTF 1\n");
     }
-    track = &mBuffer.AddTrack(AUDIO_NODE_STREAM_TRACK_ID, IdealAudioRate(), 0, segment.forget());
-  }
-  return track;
-}
-
-void
-AudioNodeExternalInputStream::FinalizeProducedOutput()
-{
-  StreamBuffer::Track* track = EnsureTrack();
-  AudioSegment* segment = track->Get<AudioSegment>();
-
-  if (mOutputChunkQueue.size() > 0) {
-    mNextOutputChunk = mOutputChunkQueue.back();
-    mOutputChunkQueue.pop_back();
+    mOutputChunkQueue.pop_front();
   }
   else {
-    mNextOutputChunk.SetNull(WEBAUDIO_BLOCK_SIZE);
+    printf("WTF 2\n");
+    mLastChunks[0].SetNull(WEBAUDIO_BLOCK_SIZE);
   }
 
-  printf("duration: %lld\n", mNextOutputChunk.GetDuration());
-
-  segment->AppendNullData(mNextOutputChunk.GetDuration());
-
-  for (uint32_t j = 0; j < mListeners.Length(); ++j) {
-    MediaStreamListener* l = mListeners[j];
-    AudioChunk copyChunk = mNextOutputChunk;
-    AudioSegment tmpSegment;
-    tmpSegment.AppendAndConsumeChunk(&copyChunk);
-    l->NotifyQueuedTrackChanges(Graph(), AUDIO_NODE_STREAM_TRACK_ID,
-                                IdealAudioRate(), segment->GetDuration(), 0,
-                                tmpSegment);
-  }
+  AdvanceOutputSegment();
 }
 
 }

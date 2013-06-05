@@ -114,6 +114,7 @@ public:
   TrackRate SampleRate() const { return mSampleRate; }
 
 protected:
+  void AdvanceOutputSegment();
   void FinishOutput();
 
   StreamBuffer::Track* EnsureTrack();

@@ -116,8 +116,6 @@ public:
 protected:
   void FinishOutput();
 
-  void FinalizeProducedOutput();
-
   StreamBuffer::Track* EnsureTrack();
   void ObtainInputBlock(AudioChunk& aTmpChunk, uint32_t aPortIndex);
 

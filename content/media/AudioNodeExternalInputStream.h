@@ -11,6 +11,7 @@
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
 #include "mozilla/dom/AudioParam.h"
+#include <deque>
 
 #ifdef PR_LOGGING
 #define LOG(type, msg) PR_LOG(gMediaStreamGraphLog, type, msg)
@@ -37,7 +38,7 @@ public:
   // Any thread
   AudioNodeEngine* Engine() { return mEngine; }
 
-  AudioChunk* GetNextOutputChunk();
+  AudioChunk* GetNextOutputChunk() { return &mNextOutputChunk; }
 
 private:
   struct TrackMapEntry {
@@ -51,13 +52,11 @@ private:
     uint32_t mOffset;
   };
 
-  ChunkMetaData mCurrentChunkMetaData;
+  uint32_t mLastChunkOffset;
 
-  nsTArray<AudioChunk> mChunkQueue;
+  std::deque<AudioChunk> mOutputChunkQueue;
 
-  uint32_t mOutputIndex;
-
-  AudioChunk* mNextOutputChunk;
+  AudioChunk mNextOutputChunk;
 
   // The engine that will generate output for this node.
   nsAutoPtr<AudioNodeEngine> mEngine;
@@ -68,7 +67,7 @@ private:
 
   nsTArray<TrackMapEntry> mTrackMap;
 
-  TrackMapEntry* GetTrackMap(StreamBuffer::Track* aTrack);
+  TrackMapEntry* GetTrackMap(const StreamBuffer::Track& aTrack);
 
   void WriteToCurrentChunk(SpeexResamplerState* resampler,
                            TrackRate aInputRate,
@@ -78,10 +77,10 @@ private:
                            uint32_t& aActualIntputSamples,
                            uint32_t& aActualOutputSamples);
 
-  void ConsumeInputData(StreamBuffer::Track* aInputTrack,
-                        TrackRate aInputRate,
-                        TrackTicks aStartTicks,
-                        TrackTicks aEndTicks);
+  void ConsumeInputData(const StreamBuffer::Track& aInputTrack,
+                        AudioNodeExternalInputStream::ChunkMetaData& aChunkMetaData);
+
+  bool PrepareOutputChunkQueue(AudioNodeExternalInputStream::ChunkMetaData& aChunkMetaData);
 };
 
 }

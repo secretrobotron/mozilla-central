@@ -281,18 +281,18 @@ AudioNodeStream::ObtainInputBlock(AudioChunk& aTmpChunk, uint32_t aPortIndex)
     AudioNodeExternalInputStream* audioNodeExternalInputStream = static_cast<AudioNodeExternalInputStream*>(s);
     AudioChunk* chunk;
 
-    if (a == s->AsAudioNodeStream()) {
+    if (audioNodeExternalInputStream == s->AsAudioNodeExternalInputStream()) {
+      if (audioNodeExternalInputStream->IsFinishedOnGraphThread()) {
+        continue;
+      }
+      chunk = audioNodeExternalInputStream->GetNextOutputChunk();
+    }
+    else if (a == s->AsAudioNodeStream()) {
       if (a->IsFinishedOnGraphThread() ||
           a->IsAudioParamStream()) {
         continue;
       }
       chunk = &a->mLastChunks[mInputs[i]->OutputNumber()];
-    }
-    else if (audioNodeExternalInputStream == s->AsAudioNodeExternalInputStream()) {
-      if (audioNodeExternalInputStream->IsFinishedOnGraphThread()) {
-        continue;
-      }
-      chunk = audioNodeExternalInputStream->GetNextOutputChunk();
     }
     else {
       MOZ_ASSERT(false, "Not a valid input audio node stream.");
@@ -414,7 +414,9 @@ AudioNodeStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
     FinishOutput();
   }
 
-  EnsureTrack();
+  StreamBuffer::Track* track = EnsureTrack();
+
+  AudioSegment* segment = track->Get<AudioSegment>();
 
   uint16_t outputCount = std::max(uint16_t(1), mEngine->OutputCount());
   mLastChunks.SetLength(outputCount);
@@ -447,21 +449,6 @@ AudioNodeStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
     }
   }
 
-  FinalizeProducedOutput();
-}
-
-void
-AudioNodeStream::FinalizeProducedOutput()
-{
-  StreamBuffer::Track* track = EnsureTrack();
-  AudioSegment* segment = track->Get<AudioSegment>();
-
-  if (mDisabledTrackIDs.Contains(AUDIO_NODE_STREAM_TRACK_ID)) {
-    for (uint32_t i = 0; i < mLastChunks.Length(); ++i) {
-      mLastChunks[i].SetNull(WEBAUDIO_BLOCK_SIZE);
-    }
-  }
-
   if (mKind == MediaStreamGraph::EXTERNAL_STREAM) {
     segment->AppendAndConsumeChunk(&mLastChunks[0]);
   } else {
@@ -476,7 +463,7 @@ AudioNodeStream::FinalizeProducedOutput()
     l->NotifyQueuedTrackChanges(Graph(), AUDIO_NODE_STREAM_TRACK_ID,
                                 mSampleRate, segment->GetDuration(), 0,
                                 tmpSegment);
-  }  
+  }
 }
 
 TrackTicks

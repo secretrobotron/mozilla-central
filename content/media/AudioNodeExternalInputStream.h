@@ -34,19 +34,23 @@ public:
   virtual void ProduceOutput(GraphTime aFrom, GraphTime aTo);
 
 private:
+  // For storing pointers and data about input tracks, like the last TrackTick which
+  // was read, and the associated speex resampler.
   struct TrackMapEntry {
     SpeexResamplerState* mResampler;
     TrackTicks mLastTick;
     TrackID mTrackID;
   };
 
+  // For easily pairing data about output chunks.
   struct ChunkMetaData {
     uint32_t mIndex;
     uint32_t mOffset;
   };
 
-  AudioChunk mCurrentChunk;
+  // The last known position inside the chunk at the end of the output queue.
   uint32_t mLastChunkOffset;
+
   std::deque<AudioChunk> mOutputChunkQueue;
   nsTArray<TrackMapEntry> mTrackMap;
 

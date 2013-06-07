@@ -31,7 +31,6 @@ public:
   ~AudioNodeExternalInputStream();
 
   virtual AudioNodeExternalInputStream* AsAudioNodeExternalInputStream() { return this; }
-  AudioChunk* GetNextOutputChunk() { return &mNextOutputChunk; }
   virtual void ProduceOutput(GraphTime aFrom, GraphTime aTo);
 
 private:
@@ -46,8 +45,8 @@ private:
     uint32_t mOffset;
   };
 
+  AudioChunk mCurrentChunk;
   uint32_t mLastChunkOffset;
-  AudioChunk mNextOutputChunk;
   std::deque<AudioChunk> mOutputChunkQueue;
   nsTArray<TrackMapEntry> mTrackMap;
 
@@ -59,6 +58,7 @@ private:
                            TrackRate aInputRate,
                            const AudioChunk& aInputChunk,
                            const AudioChunk& aOutputChunk,
+                           uint32_t aInputOffset,
                            uint32_t aOutputOffset,
                            uint32_t& aActualIntputSamples,
                            uint32_t& aActualOutputSamples);

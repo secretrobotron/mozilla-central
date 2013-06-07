@@ -19,12 +19,13 @@
 
     var audio = document.querySelector('audio');
 
-    audio.oncanplay = function (e) {
+    audio.addEventListener('canplay', function onCanPlay (e) {
+      audio.removeEventListener('canplay', onCanPlay, false);
       var stream = audio.mozCaptureStream();
       var source = context.createMediaStreamSource(stream);
       source.connect(context.destination);
       audio.play();
-    };
+    }, false);
 
     audio.load();
   </script>

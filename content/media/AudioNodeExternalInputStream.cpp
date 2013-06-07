@@ -10,7 +10,8 @@
 
 using namespace mozilla::dom;
 
-static const int MAX_QUEUE_LENGTH = 500;
+static const int MAX_QUEUE_LENGTH = 20;
+uint16_t sploof = 0;
 
 namespace mozilla {
 
@@ -64,8 +65,9 @@ AudioNodeExternalInputStream::WriteToCurrentChunk(SpeexResamplerState* aResample
                                                   TrackRate aInputRate,
                                                   const AudioChunk& aInputChunk,
                                                   const AudioChunk& aOutputChunk,
+                                                  uint32_t aInputOffset,
                                                   uint32_t aOutputOffset,
-                                                  uint32_t& aActualIntputSamples,
+                                                  uint32_t& aActualInputSamples,
                                                   uint32_t& aActualOutputSamples)
 {
   double inputPlaybackRate = aInputRate;
@@ -73,11 +75,11 @@ AudioNodeExternalInputStream::WriteToCurrentChunk(SpeexResamplerState* aResample
 
   const uint32_t numberOfChannels = aInputChunk.mChannelData.Length();
 
-  uint32_t inputSamples = aInputChunk.GetDuration();
+  uint32_t inputSamples = aInputChunk.GetDuration() - aInputOffset;
   uint32_t outputSamples = WEBAUDIO_BLOCK_SIZE - aOutputOffset;
 
   aActualOutputSamples = 0;
-  aActualIntputSamples = 0;
+  aActualInputSamples = 0;
 
   if (inputSamples < outputSamples * finalPlaybackRate) {
     outputSamples = ceil(inputSamples / finalPlaybackRate);
@@ -91,37 +93,39 @@ AudioNodeExternalInputStream::WriteToCurrentChunk(SpeexResamplerState* aResample
 
     uint32_t in = inputSamples;
     uint32_t out = outputSamples;
-    float* finalData = static_cast<float*>(const_cast<void*>(aOutputChunk.mChannelData[i]));
+    float* finalData = static_cast<float*>(const_cast<void*>(aOutputChunk.mChannelData[i])) + aOutputOffset;
 
-    if (aInputChunk.mBufferFormat == AUDIO_FORMAT_S16) {
-      int16_t* outputData = reinterpret_cast<int16_t*>(rawBuffer);
-      int16_t* inputData = static_cast<int16_t*>(const_cast<void*>(aInputChunk.mChannelData[i]));
-      speex_resampler_process_int(aResampler, i,
-                                  inputData, &in,
-                                  outputData, &out);
+    // if (aInputChunk.mBufferFormat == AUDIO_FORMAT_S16) {
+    //   int16_t* outputData = reinterpret_cast<int16_t*>(rawBuffer);
+    //   int16_t* inputData = static_cast<int16_t*>(const_cast<void*>(aInputChunk.mChannelData[i]));
+    //   speex_resampler_process_int(aResampler, i,
+    //                               inputData, &in,
+    //                               outputData, &out);
 
-      for (uint32_t k = aOutputOffset; k < aOutputOffset + out; ++k) {
-        finalData[k] += AudioSampleToFloat(outputData[k]);
-      }
-    }
-    else {
-      float* outputData = reinterpret_cast<float*>(rawBuffer);
-      float* inputData = static_cast<float*>(const_cast<void*>(aInputChunk.mChannelData[i]));
+    //   for (uint32_t k = aOutputOffset; k < aOutputOffset + out; ++k) {
+    //     finalData[k] += AudioSampleToFloat(outputData[k]);
+    //   }
+    // }
+    // else {
+      float* outputData = reinterpret_cast<float*>(rawBuffer) + aOutputOffset;
+      float* inputData = static_cast<float*>(const_cast<void*>(aInputChunk.mChannelData[i])) + aInputOffset;
       speex_resampler_process_float(aResampler, i,
                                     inputData, &in,
                                     outputData, &out);
       
-      for (uint32_t k = aOutputOffset; k < aOutputOffset + out; ++k) {
-        finalData[k] += outputData[k];
+      if (i == aInputChunk.mChannelData.Length() - 1) {
+        //printf("writing from %d to %d to %x\n", aOutputOffset, aOutputOffset + out, &aOutputChunk);
       }
-    }
+
+      for (uint32_t k = 0; k < out; ++k) {
+        finalData[k] += outputData[k];
+      }      
+   // }
 
     if (i == aInputChunk.mChannelData.Length() - 1) {
       // In the last iteration of the loop, remember how many more frames we need to produce.
-      // printf("input: %d => %d\toutput: %d => %d\n",
-      //   inputSamples, in, outputSamples, out);
       aActualOutputSamples = out;
-      aActualIntputSamples = in;
+      aActualInputSamples = in;
     }
   }
 }
@@ -129,16 +133,22 @@ AudioNodeExternalInputStream::WriteToCurrentChunk(SpeexResamplerState* aResample
 bool
 AudioNodeExternalInputStream::PrepareOutputChunkQueue(AudioNodeExternalInputStream::ChunkMetaData& aChunkMetaData)
 {
+  // printf("\nPREPARE\n");
+  // printf("offset: %d\n", aChunkMetaData.mOffset);
+  // printf("index: %d/%zd\n", aChunkMetaData.mIndex, mOutputChunkQueue.size());
   if (aChunkMetaData.mOffset == WEBAUDIO_BLOCK_SIZE) {
     if (aChunkMetaData.mIndex == mOutputChunkQueue.size() - 1) {
       if (mOutputChunkQueue.size() == MAX_QUEUE_LENGTH) {
         return false;
       }
+      // printf("creating new chunk\n");
       AudioChunk tmpChunk;
       mOutputChunkQueue.push_back(tmpChunk);
     }
     ++aChunkMetaData.mIndex;
     aChunkMetaData.mOffset = 0;
+    // printf("new offset: %d\n", aChunkMetaData.mOffset);
+    // printf("new index: %d/%zd\n", aChunkMetaData.mIndex, mOutputChunkQueue.size());
   }
   return true;
 }
@@ -162,6 +172,8 @@ AudioNodeExternalInputStream::ConsumeInputData(const StreamBuffer::Track& aInput
   uint32_t in;
   uint32_t out;
 
+  // printf("\n\nENTER\n");
+
   while (!ci.IsEnded()) {
     const AudioChunk& currentInputChunk = *ci;
 
@@ -175,14 +187,22 @@ AudioNodeExternalInputStream::ConsumeInputData(const StreamBuffer::Track& aInput
       break;
     }
 
-    if (mOutputChunkQueue[aChunkMetaData.mIndex].IsNull()) {
-      AllocateAudioBlock(currentInputChunk.mChannelData.Length(), &mOutputChunkQueue[aChunkMetaData.mIndex]);
-      WriteZeroesToAudioBlock(&mOutputChunkQueue[aChunkMetaData.mIndex], 0, WEBAUDIO_BLOCK_SIZE);
+    AudioChunk* currentOutputChunk = &mOutputChunkQueue[aChunkMetaData.mIndex];
+
+    if (currentOutputChunk->IsNull()) {
+      AllocateAudioBlock(currentInputChunk.mChannelData.Length(), currentOutputChunk);
+      WriteZeroesToAudioBlock(currentOutputChunk, 0, WEBAUDIO_BLOCK_SIZE);
     }
+
+    // printf("\nCHUNKS\n");
+    // printf("in:%x out:%x\n", &currentInputChunk, currentOutputChunk);
+    // printf("input consumed (before): %d/%lld :: %lld\n", chunkInputConsumed, currentInputChunk.GetDuration(), trackMap->mLastTick);
+    // printf("output consumed (before): %d/%d\n", aChunkMetaData.mOffset, 128);
 
     WriteToCurrentChunk(resampler,
                         aInputTrack.GetRate(),
-                        currentInputChunk, mOutputChunkQueue[aChunkMetaData.mIndex],
+                        currentInputChunk, *currentOutputChunk,
+                        chunkInputConsumed,
                         aChunkMetaData.mOffset,
                         in, out);
 
@@ -190,11 +210,17 @@ AudioNodeExternalInputStream::ConsumeInputData(const StreamBuffer::Track& aInput
     trackMap->mLastTick += in;
     aChunkMetaData.mOffset += out;
 
+    // printf("input consumed (after): %d/%lld :: %lld\n", chunkInputConsumed, currentInputChunk.GetDuration(), trackMap->mLastTick);
+    // printf("output consumed (after): %d/%d\n", aChunkMetaData.mOffset, 128);
+    // printf("\n");
+
     if (chunkInputConsumed == currentInputChunk.GetDuration()) {
       ci.Next();
       chunkInputConsumed = 0;
     }
   }
+
+  // printf("\nEXIT\n\n");
 }
 
 void
@@ -236,15 +262,12 @@ AudioNodeExternalInputStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
     mLastChunkOffset = maxChunkMetaData.mOffset;
   }
 
-  if (!mOutputChunkQueue.empty()) {
+  if (!mOutputChunkQueue.empty() && !(mOutputChunkQueue.size() == 1 && mLastChunkOffset < WEBAUDIO_BLOCK_SIZE)) {
     mLastChunks[0] = mOutputChunkQueue.front();
-    if (mLastChunks[0].IsNull()) {
-      printf("WTF 1\n");
-    }
+    // printf("%x, %x, %x\n", &(mLastChunks[0]), &(mLastChunks[0].mChannelData), &(mLastChunks[0].mChannelData[0]));
     mOutputChunkQueue.pop_front();
   }
   else {
-    printf("WTF 2\n");
     mLastChunks[0].SetNull(WEBAUDIO_BLOCK_SIZE);
   }
 

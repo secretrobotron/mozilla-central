@@ -7,6 +7,7 @@
 
 #include "MediaStreamGraphImpl.h"
 #include "AudioNodeEngine.h"
+#include "AudioNodeExternalInputStream.h"
 #include "ThreeDPoint.h"
 
 using namespace mozilla::dom;
@@ -383,9 +384,7 @@ AudioNodeStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
     FinishOutput();
   }
 
-  StreamBuffer::Track* track = EnsureTrack(AUDIO_NODE_STREAM_TRACK_ID, mSampleRate);
-
-  AudioSegment* segment = track->Get<AudioSegment>();
+  EnsureTrack(AUDIO_NODE_STREAM_TRACK_ID, mSampleRate);
 
   uint16_t outputCount = std::max(uint16_t(1), mEngine->OutputCount());
   mLastChunks.SetLength(outputCount);
@@ -423,6 +422,15 @@ AudioNodeStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
       mLastChunks[i].SetNull(WEBAUDIO_BLOCK_SIZE);
     }
   }
+
+  AdvanceOutputSegment();
+}
+
+void
+AudioNodeStream::AdvanceOutputSegment()
+{
+  StreamBuffer::Track* track = EnsureTrack(AUDIO_NODE_STREAM_TRACK_ID, mSampleRate);
+  AudioSegment* segment = track->Get<AudioSegment>();
 
   if (mKind == MediaStreamGraph::EXTERNAL_STREAM) {
     segment->AppendAndConsumeChunk(&mLastChunks[0]);

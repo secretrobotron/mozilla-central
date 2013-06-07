@@ -120,6 +120,7 @@ public:
   TrackRate SampleRate() const { return mSampleRate; }
 
 protected:
+  void AdvanceOutputSegment();
   void FinishOutput();
 
   void ObtainInputBlock(AudioChunk& aTmpChunk, uint32_t aPortIndex);

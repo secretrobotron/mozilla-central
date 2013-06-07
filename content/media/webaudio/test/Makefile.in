@@ -63,6 +63,7 @@ MOCHITEST_FILES := \
   test_maxChannelCount.html \
   test_mediaDecoding.html \
   test_mediaStreamAudioDestinationNode.html \
+  test_mediaStreamAudioSourceNode.html \
   test_mixingRules.html \
   test_nodeToParamConnection.html \
   test_OfflineAudioContext.html \
@@ -96,6 +97,7 @@ MOCHITEST_FILES := \
   audio-expected.wav \
   audio-mono-expected.wav \
   audio-mono-expected-2.wav \
+  sin-440-1024smpl-48k.wav \
   $(NULL)
 
 include $(topsrcdir)/config/rules.mk

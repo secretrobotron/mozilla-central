@@ -87,6 +87,8 @@ function getEmptyBuffer(context, length) {
  *                          to be silence.  The sum of the length of the expected
  *                          buffers should be equal to gTest.length.  This
  *                          function is guaranteed to be called before createGraph.
+ * + skipOfflineContextTests: optional. when true, skips running tests on an offline
+ *                            context by circumventing testOnOfflineContext.
  */
 function runTest()
 {
@@ -96,7 +98,7 @@ function runTest()
   }
 
   SimpleTest.waitForExplicitFinish();
-  addLoadEvent(function() {
+  function runTestFunction () {
     SpecialPowers.setBoolPref("media.webaudio.enabled", true);
 
     if (!gTest.numberOfChannels) {
@@ -180,14 +182,25 @@ function runTest()
         };
         context.startRendering();
       }
-      var context = new OfflineAudioContext(gTest.numberOfChannels, testLength, sampleRate);
+
+      var context = new OfflineAudioContext(gTest.numberOfChannels, 1024, sampleRate);
       runTestOnContext(context, callback, testOutput);
     }
 
     testOnNormalContext(function() {
-      testOnOfflineContext(function() {
-        testOnOfflineContext(done, 44100);
-      }, 48000);
+      if (!gTest.skipOfflineContextTests) {
+        testOnOfflineContext(function() {
+          testOnOfflineContext(done, 44100);
+        }, 48000);
+      } else {
+        done();
+      }
     });
-  });
+  };
+
+  if (document.readyState !== 'complete') {
+    addLoadEvent(runTestFunction);
+  } else {
+    runTestFunction();
+  }
 }

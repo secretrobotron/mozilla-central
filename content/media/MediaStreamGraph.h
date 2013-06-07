@@ -190,8 +190,9 @@ class MediaStreamGraphImpl;
 class SourceMediaStream;
 class ProcessedMediaStream;
 class MediaInputPort;
-class AudioNodeStream;
 class AudioNodeEngine;
+class AudioNodeExternalInputStream;
+class AudioNodeStream;
 struct AudioChunk;
 
 /**
@@ -359,6 +360,7 @@ public:
 
   friend class MediaStreamGraphImpl;
   friend class MediaInputPort;
+  friend class AudioNodeExternalInputStream;
 
   virtual SourceMediaStream* AsSourceStream() { return nullptr; }
   virtual ProcessedMediaStream* AsProcessedStream() { return nullptr; }
@@ -953,6 +955,11 @@ public:
   AudioNodeStream* CreateAudioNodeStream(AudioNodeEngine* aEngine,
                                          AudioNodeStreamKind aKind,
                                          TrackRate aSampleRate = 0);
+
+  AudioNodeExternalInputStream*
+  CreateAudioNodeExternalInputStream(AudioNodeEngine* aEngine,
+                                     TrackRate aSampleRate = 0);
+
   /**
    * Returns the number of graph updates sent. This can be used to track
    * whether a given update has been processed by the graph thread and reflected

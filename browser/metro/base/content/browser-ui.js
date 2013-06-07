@@ -540,7 +540,11 @@ var BrowserUI = {
   },
 
   blurNavBar: function blurNavBar() {
-    this._edit.blur();
+    if (this._edit.focused) {
+      this._edit.blur();
+      return true;
+    }
+    return false;
   },
 
   // If the user types in the address bar, cancel pending
@@ -1409,6 +1413,7 @@ var StartUI = {
     Elements.startUI.addEventListener("autocompleteend", this, false);
     Elements.startUI.addEventListener("contextmenu", this, false);
     Elements.startUI.addEventListener("click", this, false);
+    Elements.startUI.addEventListener("MozMousePixelScroll", this, false);
 
     this.sections.forEach(function (sectionName) {
       let section = window[sectionName];
@@ -1493,7 +1498,11 @@ var StartUI = {
   onClick: function onClick(aEvent) {
     // If someone clicks / taps in empty grid space, take away
     // focus from the nav bar edit so the soft keyboard will hide.
-    BrowserUI.blurNavBar();
+    if (BrowserUI.blurNavBar()) {
+      // Advanced notice to CAO, so we can shuffle the nav bar in advance
+      // of the keyboard transition.
+      ContentAreaObserver.navBarWillBlur();
+    }
   },
 
   handleEvent: function handleEvent(aEvent) {
@@ -1511,6 +1520,16 @@ var StartUI = {
         break;
       case "click":
         this.onClick(aEvent);
+        break;
+
+      case "MozMousePixelScroll":
+        let startBox = document.getElementById("start-scrollbox");
+        let [, scrollInterface] = ScrollUtils.getScrollboxFromElement(startBox);
+
+        scrollInterface.scrollBy(aEvent.detail, 0);
+
+        aEvent.preventDefault();
+        aEvent.stopPropagation();
         break;
     }
   }

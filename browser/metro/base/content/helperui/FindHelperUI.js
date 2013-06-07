@@ -3,6 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* We don't support zooming yet, disable Animated zoom by clamping it to the default zoom. */
+const kBrowserFindZoomLevelMin = 1;
+const kBrowserFindZoomLevelMax = 1;
+
 var FindHelperUI = {
   type: "find",
   commands: {
@@ -115,8 +119,10 @@ var FindHelperUI = {
     this._textbox.select();
     this._textbox.focus();
     this._open = true;
-    Elements.browsers.setAttribute("findbar", true);
-    setTimeout(() => this._container.setAttribute("showing", true), 0);
+    setTimeout(() => {
+      Elements.browsers.setAttribute("findbar", true);
+      this._container.setAttribute("showing", true)
+    }, 0);
 
     // Prevent the view to scroll automatically while searching
     Browser.selectedBrowser.scrollSync = false;
@@ -173,8 +179,8 @@ var FindHelperUI = {
 
       // Clamp the zoom level relatively to the default zoom level of the page
       let defaultZoomLevel = Browser.selectedTab.getDefaultZoomLevel();
-      zoomLevel = Util.clamp(zoomLevel, (defaultZoomLevel * kBrowserFormZoomLevelMin),
-                                        (defaultZoomLevel * kBrowserFormZoomLevelMax));
+      zoomLevel = Util.clamp(zoomLevel, (defaultZoomLevel * kBrowserFindZoomLevelMin),
+                                        (defaultZoomLevel * kBrowserFindZoomLevelMax));
       zoomLevel = Browser.selectedTab.clampZoomLevel(zoomLevel);
 
       let zoomRect = Browser._getZoomRectForPoint(aElementRect.center().x, aElementRect.y, zoomLevel);

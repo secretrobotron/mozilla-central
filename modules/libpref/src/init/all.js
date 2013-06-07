@@ -760,9 +760,6 @@ pref("dom.forms.color", false);
 // Enables system messages and activities
 pref("dom.sysmsg.enabled", false);
 
-// Allocation Threshold for Workers
-pref("dom.workers.mem.gc_allocation_threshold_mb", 30);
-
 // Parsing perf prefs. For now just mimic what the old code did.
 #ifndef XP_WIN
 pref("content.sink.pending_event_mode", 0);
@@ -1015,7 +1012,6 @@ pref("network.http.spdy.enabled.v3", true);
 pref("network.http.spdy.chunk-size", 4096);
 pref("network.http.spdy.timeout", 180);
 pref("network.http.spdy.coalesce-hostnames", true);
-pref("network.http.spdy.use-alternate-protocol", true);
 pref("network.http.spdy.persistent-settings", false);
 pref("network.http.spdy.ping-threshold", 58);
 pref("network.http.spdy.ping-timeout", 8);
@@ -3966,6 +3962,10 @@ pref("webgl.force-layers-readback", false);
 pref("webgl.lose-context-on-heap-minimize", false);
 pref("webgl.can-lose-context-in-foreground", true);
 pref("webgl.max-warnings-per-context", 32);
+#ifdef MOZ_WIDGET_GONK
+pref("gfx.gralloc.fence-with-readpixels", false);
+#endif
+
 
 // Stagefright prefs
 pref("stagefright.force-enabled", false);

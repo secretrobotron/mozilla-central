@@ -142,6 +142,10 @@ class TestRecursiveMakeBackend(BackendTester):
                 'ASFILES += bar.s',
                 'ASFILES += foo.asm',
             ],
+            'CMMSRCS': [
+                'CMMSRCS += bar.mm',
+                'CMMSRCS += foo.mm',
+            ],
             'CSRCS': [
                 'CSRCS += bar.c',
                 'CSRCS += foo.c',
@@ -149,6 +153,14 @@ class TestRecursiveMakeBackend(BackendTester):
             'DEFINES': [
                 'DEFINES += -Dbar',
                 'DEFINES += -Dfoo',
+            ],
+            'EXTRA_COMPONENTS': [
+                'EXTRA_COMPONENTS += bar.js',
+                'EXTRA_COMPONENTS += foo.js',
+            ],
+            'HOST_CSRCS': [
+                'HOST_CSRCS += bar.c',
+                'HOST_CSRCS += foo.c',
             ],
             'SIMPLE_PROGRAMS': [
                 'SIMPLE_PROGRAMS += bar.x',

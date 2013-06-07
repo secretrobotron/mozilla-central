@@ -287,12 +287,8 @@ public class GeckoAppShell
         // run gecko -- it will spawn its own thread
         GeckoAppShell.nativeInit();
 
-        // Tell Gecko where the target byte buffer is for rendering
-        if (getGeckoInterface() != null)
-           sLayerView  = getGeckoInterface().getLayerView();
         if (sLayerView != null)
             GeckoAppShell.setLayerClient(sLayerView.getLayerClient());
-
 
         // First argument is the .apk path
         String combinedArgs = apkPath + " -greomni " + apkPath;
@@ -2041,9 +2037,13 @@ public class GeckoAppShell
         sContextGetter = cg;
     }
 
+    public interface AppStateListener {
+        public void onPause();
+        public void onResume();
+    }
+
     public interface GeckoInterface {
         public GeckoProfile getProfile();
-        public LayerView getLayerView();
         public PromptService getPromptService();
         public Activity getActivity();
         public String getDefaultUAString();
@@ -2055,6 +2055,8 @@ public class GeckoAppShell
         public void removePluginView(final View view, final boolean isFullScreen);
         public void enableCameraView();
         public void disableCameraView();
+        public void addAppStateListener(AppStateListener listener);
+        public void removeAppStateListener(AppStateListener listener);
         public SurfaceView getCameraView();
         public void notifyWakeLockChanged(String topic, String state);
         public FormAssistPopup getFormAssistPopup();

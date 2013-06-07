@@ -16,7 +16,6 @@
 #include "jswrapper.h"
 
 #include "frontend/BytecodeCompiler.h"
-#include "frontend/BytecodeEmitter.h"
 #include "gc/Marking.h"
 #include "ion/BaselineJIT.h"
 #include "js/Vector.h"
@@ -112,7 +111,7 @@ ReportObjectRequired(JSContext *cx)
 }
 
 bool
-ValueToIdentifier(JSContext *cx, const Value &v, MutableHandleId id)
+ValueToIdentifier(JSContext *cx, HandleValue v, MutableHandleId id)
 {
     if (!ValueToId<CanGC>(cx, v, id))
         return false;
@@ -403,6 +402,13 @@ Debugger::init(JSContext *cx)
     if (!ok)
         js_ReportOutOfMemory(cx);
     return ok;
+}
+
+Debugger *
+Debugger::fromJSObject(JSObject *obj)
+{
+    JS_ASSERT(js::GetObjectClass(obj) == &jsclass);
+    return (Debugger *) obj->getPrivate();
 }
 
 JS_STATIC_ASSERT(unsigned(JSSLOT_DEBUGFRAME_OWNER) == unsigned(JSSLOT_DEBUGSCRIPT_OWNER));
@@ -1370,15 +1376,6 @@ Debugger::slowPathOnNewGlobalObject(JSContext *cx, Handle<GlobalObject *> global
 
 /*** Debugger JSObjects **************************************************************************/
 
-/* static */ bool
-Debugger::isDebugWrapper(JSObject *o)
-{
-    Class *c = o->getClass();
-    return c == &DebuggerObject_class ||
-           c == &DebuggerEnv_class ||
-           c == &DebuggerScript_class;
-}
-
 void
 Debugger::markKeysInCompartment(JSTracer *tracer)
 {
@@ -1607,7 +1604,7 @@ Debugger::sweepAll(FreeOp *fop)
         }
     }
 
-    for (CompartmentsIter comp(rt); !comp.done(); comp.next()) {
+    for (gc::GCCompartmentsIter comp(rt); !comp.done(); comp.next()) {
         /* For each debuggee being GC'd, detach it from all its debuggers. */
         GlobalObjectSet &debuggees = comp->getDebuggees();
         for (GlobalObjectSet::Enum e(debuggees); !e.empty(); e.popFront()) {
@@ -3247,9 +3244,10 @@ DebuggerScript_getAllOffsets(JSContext *cx, unsigned argc, Value *vp)
                  * Store it in the result array.
                  */
                 RootedId id(cx);
+                RootedValue v(cx, NumberValue(lineno));
                 offsets = NewDenseEmptyArray(cx);
                 if (!offsets ||
-                    !ValueToId<CanGC>(cx, NumberValue(lineno), &id))
+                    !ValueToId<CanGC>(cx, v, &id))
                 {
                     return false;
                 }
@@ -3368,6 +3366,12 @@ DebuggerScript_getLineOffsets(JSContext *cx, unsigned argc, Value *vp)
 
     args.rval().setObject(*result);
     return true;
+}
+
+bool
+Debugger::observesFrame(AbstractFramePtr frame) const
+{
+    return observesGlobal(&frame.script()->global());
 }
 
 bool
@@ -4569,7 +4573,7 @@ DebuggerObject_getOwnPropertyDescriptor(JSContext *cx, unsigned argc, Value *vp)
     THIS_DEBUGOBJECT_OWNER_REFERENT(cx, argc, vp, "getOwnPropertyDescriptor", args, dbg, obj);
 
     RootedId id(cx);
-    if (!ValueToId<CanGC>(cx, argc >= 1 ? args[0] : UndefinedValue(), &id))
+    if (!ValueToId<CanGC>(cx, args.handleOrUndefinedAt(0), &id))
         return false;
 
     /* Bug: This can cause the debuggee to run! */
@@ -4659,7 +4663,7 @@ DebuggerObject_defineProperty(JSContext *cx, unsigned argc, Value *vp)
     REQUIRE_ARGC("Debugger.Object.defineProperty", 2);
 
     RootedId id(cx);
-    if (!ValueToId<CanGC>(cx, args[0], &id))
+    if (!ValueToId<CanGC>(cx, args.handleAt(0), &id))
         return false;
 
     const Value &descval = args[1];
@@ -5302,7 +5306,7 @@ DebuggerEnv_find(JSContext *cx, unsigned argc, Value *vp)
     THIS_DEBUGENV_OWNER(cx, argc, vp, "find", args, envobj, env, dbg);
 
     RootedId id(cx);
-    if (!ValueToIdentifier(cx, args[0], &id))
+    if (!ValueToIdentifier(cx, args.handleAt(0), &id))
         return false;
 
     {
@@ -5333,7 +5337,7 @@ DebuggerEnv_getVariable(JSContext *cx, unsigned argc, Value *vp)
     THIS_DEBUGENV_OWNER(cx, argc, vp, "getVariable", args, envobj, env, dbg);
 
     RootedId id(cx);
-    if (!ValueToIdentifier(cx, args[0], &id))
+    if (!ValueToIdentifier(cx, args.handleAt(0), &id))
         return false;
 
     RootedValue v(cx);
@@ -5362,7 +5366,7 @@ DebuggerEnv_setVariable(JSContext *cx, unsigned argc, Value *vp)
     THIS_DEBUGENV_OWNER(cx, argc, vp, "setVariable", args, envobj, env, dbg);
 
     RootedId id(cx);
-    if (!ValueToIdentifier(cx, args[0], &id))
+    if (!ValueToIdentifier(cx, args.handleAt(0), &id))
         return false;
 
     RootedValue v(cx, args[1]);

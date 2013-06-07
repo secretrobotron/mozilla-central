@@ -21,47 +21,31 @@ Cu.import('resource://gre/modules/Payment.jsm');
 Cu.import("resource://gre/modules/accessibility/AccessFu.jsm");
 #endif
 
-XPCOMUtils.defineLazyGetter(this, "PluralForm", function() {
-  Cu.import("resource://gre/modules/PluralForm.jsm");
-  return PluralForm;
-});
+XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
+                                  "resource://gre/modules/PluralForm.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "DebuggerServer", function() {
-  Cu.import("resource://gre/modules/devtools/dbg-server.jsm");
-  return DebuggerServer;
-});
+XPCOMUtils.defineLazyModuleGetter(this, "DebuggerServer",
+                                  "resource://gre/modules/devtools/dbg-server.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "UserAgentOverrides",
                                   "resource://gre/modules/UserAgentOverrides.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "NetUtil", function() {
-  Cu.import("resource://gre/modules/NetUtil.jsm");
-  return NetUtil;
-});
+XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
+                                  "resource://gre/modules/NetUtil.jsm");
 
 #ifdef MOZ_SAFE_BROWSING
-XPCOMUtils.defineLazyGetter(this, "SafeBrowsing", function() {
-  let tmp = {};
- Cu.import("resource://gre/modules/SafeBrowsing.jsm", tmp);
-  return tmp.SafeBrowsing;
-});
+XPCOMUtils.defineLazyModuleGetter(this, "SafeBrowsing",
+                                  "resource://gre/modules/SafeBrowsing.jsm");
 #endif
 
-XPCOMUtils.defineLazyGetter(this, "PrivateBrowsingUtils", function() {
-  Cu.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
-  return PrivateBrowsingUtils;
-});
+XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
+                                  "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "Sanitizer", function() {
-  Cu.import("resource://gre/modules/Sanitizer.jsm");
-  return Sanitizer;
-});
+XPCOMUtils.defineLazyModuleGetter(this, "Sanitizer",
+                                  "resource://gre/modules/Sanitizer.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "Prompt", function() {
-  let temp = {};
-  Cu.import("resource://gre/modules/Prompt.jsm", temp);
-  return temp.Prompt;
-});
+XPCOMUtils.defineLazyModuleGetter(this, "Prompt",
+                                  "resource://gre/modules/Prompt.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "FormHistory",
                                   "resource://gre/modules/FormHistory.jsm");
@@ -213,10 +197,8 @@ XPCOMUtils.defineLazyGetter(this, "ContentAreaUtils", function() {
   return ContentAreaUtils;
 });
 
-XPCOMUtils.defineLazyGetter(this, "Rect", function() {
-  Cu.import("resource://gre/modules/Geometry.jsm");
-  return Rect;
-});
+XPCOMUtils.defineLazyModuleGetter(this, "Rect",
+                                  "resource://gre/modules/Geometry.jsm");
 
 function resolveGeckoURI(aURI) {
   if (aURI.startsWith("chrome://")) {
@@ -252,7 +234,6 @@ var BrowserApp = {
   _tabs: [],
   _selectedTab: null,
   _prefObservers: [],
-  _promptHandlers: {},
 
   get isTablet() {
     let sysInfo = Cc["@mozilla.org/system-info;1"].getService(Ci.nsIPropertyBag2);
@@ -302,7 +283,6 @@ var BrowserApp = {
     Services.obs.addObserver(this, "FormHistory:Init", false);
     Services.obs.addObserver(this, "gather-telemetry", false);
     Services.obs.addObserver(this, "keyword-search", false);
-    Services.obs.addObserver(this, "Prompt:Reply", false);
 
     Services.obs.addObserver(this, "sessionstore-state-purge-complete", false);
 
@@ -1429,18 +1409,6 @@ var BrowserApp = {
         browser.contentDocument.mozCancelFullScreen();
         break;
 
-      case "Prompt:Reply":
-        {
-            let data = JSON.parse(aData);
-            let guid = data.guid;
-            let handler = this._promptHandlers[guid];
-            if (!handler)
-              break;
-            this._promptHandlers[guid];
-            handler(data);
-        }
-        break;
-
       case "Viewport:Change":
         if (this.isBrowserContentDocumentDisplayed())
           this.selectedTab.setViewport(JSON.parse(aData));
@@ -1504,35 +1472,26 @@ var BrowserApp = {
   // selecting selIndex(if fromIndex<=selIndex<=toIndex)
   showHistory: function(fromIndex, toIndex, selIndex) {
     let browser = this.selectedBrowser;
-    let guid = uuidgen.generateUUID().toString();
-    let result = {
-      type: "Prompt:Show",
-      multiple: false,
-      async: true,
-      guid: guid,
-      selected: [],
-      listitems: []
-    };
     let hist = browser.sessionHistory;
+    let listitems = [];
     for (let i = toIndex; i >= fromIndex; i--) {
       let entry = hist.getEntryAtIndex(i, false);
       let item = {
         label: entry.title || entry.URI.spec,
-        isGroup: false,
-        inGroup: false,
-        disabled: false,
-        id: i
+        selected: (i == selIndex)
       };
-      result.listitems.push(item);
-      result.selected.push(i == selIndex);
+      listitems.push(item);
     }
-    this._promptHandlers[guid] = function (data) {
+
+    let p = new Prompt({
+      window: browser.contentWindow
+    }).setSingleChoiceItems(listitems).show(function(data) {
         let selected = data.button;
         if (selected == -1)
           return;
+
         browser.gotoIndex(toIndex-selected);
-    };
-    sendMessageToJava(result);
+    });
   },
 };
 
@@ -1912,10 +1871,8 @@ var NativeWindow = {
               icon: item.icon,
               label: item.label,
               id: id,
-              isGroup: false,
-              inGroup: false,
               disabled: item.disabled,
-              isParent: item instanceof Ci.nsIDOMHTMLMenuElement
+              parent: item instanceof Ci.nsIDOMHTMLMenuElement
             }
           }
         };
@@ -2040,36 +1997,36 @@ var NativeWindow = {
       if (itemArray.length == 0)
         return;
 
-      let msg = {
-        type: "Prompt:Show",
-        title: title,
-        listitems: itemArray
-      };
-      let data = JSON.parse(sendMessageToJava(msg));
-      if (data.button == -1) {
-        // prompt was cancelled
-        return;
-      }
-
-      let selectedId = itemArray[data.button].id;
-      let selectedItem = this._getMenuItemForId(selectedId);
-
-      this.menuitems = null;
-      if (selectedItem && selectedItem.callback) {
-        if (selectedItem.matches) {
-          // for menuitems added using the native UI, pass the dom element that matched that item to the callback
-          while (aTarget) {
-            if (selectedItem.matches(aTarget, aX, aY)) {
-              selectedItem.callback.call(selectedItem, aTarget, aX, aY);
-              break;
-            }
-            aTarget = aTarget.parentNode;
-          }
-        } else {
-          // if this was added using the html5 context menu api, just click on the context menu item
-          selectedItem.callback.call(selectedItem, aTarget, aX, aY);
+      let prompt = new Prompt({
+        window: aTarget.ownerDocument.defaultView,
+        title: title
+      }).setSingleChoiceItems(itemArray)
+      .show((function(data) {
+        if (data.button == -1) {
+          // prompt was cancelled
+          return;
         }
-      }
+
+        let selectedId = itemArray[data.button].id;
+        let selectedItem = this._getMenuItemForId(selectedId);
+
+        this.menuitems = null;
+        if (selectedItem && selectedItem.callback) {
+          if (selectedItem.matches) {
+            // for menuitems added using the native UI, pass the dom element that matched that item to the callback
+            while (aTarget) {
+              if (selectedItem.matches(aTarget, aX, aY)) {
+                selectedItem.callback.call(selectedItem, aTarget, aX, aY);
+                break;
+              }
+              aTarget = aTarget.parentNode;
+            }
+          } else {
+            // if this was added using the html5 context menu api, just click on the context menu item
+            selectedItem.callback.call(selectedItem, aTarget, aX, aY);
+          }
+        }
+      }).bind(this));
     },
 
     handleEvent: function(aEvent) {
@@ -3929,8 +3886,6 @@ var BrowserEventHandler = {
     BrowserApp.deck.addEventListener("touchstart", this, true);
     BrowserApp.deck.addEventListener("click", InputWidgetHelper, true);
     BrowserApp.deck.addEventListener("click", SelectHelper, true);
-    document.addEventListener("MozMagnifyGestureStart", this, true);
-    document.addEventListener("MozMagnifyGestureUpdate", this, true);
     document.addEventListener("MozMagnifyGesture", this, true);
 
     Services.prefs.addObserver("browser.zoom.reflowOnZoom", this, false);
@@ -3959,9 +3914,9 @@ var BrowserEventHandler = {
         this._handleTouchStart(aEvent);
         break;
       case 'MozMagnifyGesture':
-      case 'MozMagnifyGestureUpdate':
-      case 'MozMagnifyGestureStart':
-        this.observe(this, aEvent.type, JSON.stringify({x: aEvent.screenX, y: aEvent.screenY}));
+        this.observe(this, aEvent.type,
+                     JSON.stringify({x: aEvent.screenX, y: aEvent.screenY,
+                                     zoomDelta: aEvent.delta}));
         break;
     }
   },
@@ -4128,9 +4083,8 @@ var BrowserEventHandler = {
         this.onDoubleTap(aData);
         break;
 
-      case "MozMagnifyGestureStart":
-      case "MozMagnifyGestureUpdate":
-        this.onPinch(aData);
+      case "MozMagnifyGesture":
+        this.onPinchFinish(aData);
         break;
 
       default:
@@ -4303,17 +4257,18 @@ var BrowserEventHandler = {
     BrowserApp.selectedTab._mReflozPoint = null;
    },
 
-   onPinch: function(aData) {
-     // We only want to do this if reflow-on-zoom is enabled.
-     if (BrowserEventHandler.mReflozPref &&
-         !BrowserApp.selectedTab._mReflozPoint) {
-       let data = JSON.parse(aData);
-       let zoomPointX = data.x;
-       let zoomPointY = data.y;
+   onPinchFinish: function(aData) {
+     let data = {};
+     try {
+       data = JSON.parse(aData);
+     } catch(ex) {
+       console.log(ex);
+       return;
+     }
 
-       BrowserApp.selectedTab._mReflozPoint = { x: zoomPointX, y: zoomPointY,
-         range: BrowserApp.selectedBrowser.contentDocument.caretPositionFromPoint(zoomPointX, zoomPointY) };
-         BrowserApp.selectedTab.probablyNeedRefloz = true;
+     if (BrowserEventHandler.mReflozPref &&
+         data.zoomDelta < 0.0) {
+       BrowserEventHandler.resetMaxLineBoxWidth();
      }
    },
 

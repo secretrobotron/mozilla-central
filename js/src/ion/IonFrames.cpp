@@ -4,26 +4,28 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "Ion.h"
 #include "IonFrames.h"
+
 #include "jsobj.h"
 #include "jsscript.h"
 #include "jsfun.h"
-#include "BaselineFrame.h"
-#include "BaselineIC.h"
-#include "BaselineJIT.h"
-#include "IonCompartment.h"
-#include "IonFrames-inl.h"
-#include "IonFrameIterator-inl.h"
-#include "Safepoints.h"
-#include "IonSpewer.h"
-#include "IonMacroAssembler.h"
-#include "PcScriptCache.h"
-#include "PcScriptCache-inl.h"
 #include "gc/Marking.h"
-#include "SnapshotReader.h"
-#include "Safepoints.h"
-#include "VMFunctions.h"
+#include "ion/BaselineFrame.h"
+#include "ion/BaselineIC.h"
+#include "ion/BaselineJIT.h"
+#include "ion/Ion.h"
+#include "ion/IonCompartment.h"
+#include "ion/IonMacroAssembler.h"
+#include "ion/IonSpewer.h"
+#include "ion/PcScriptCache.h"
+#include "ion/Safepoints.h"
+#include "ion/SnapshotReader.h"
+#include "ion/VMFunctions.h"
+
+#include "ion/IonFrameIterator-inl.h"
+#include "ion/IonFrames-inl.h"
+#include "ion/PcScriptCache-inl.h"
+#include "vm/Probes-inl.h"
 
 namespace js {
 namespace ion {
@@ -798,10 +800,26 @@ IonActivationIterator::ionStackRange(uintptr_t *&min, uintptr_t *&end)
         IonExitFrameLayout *exitFrame = frames.exitFrame();
         IonExitFooterFrame *footer = exitFrame->footer();
         const VMFunction *f = footer->function();
-        if (exitFrame->isWrapperExit() && f->outParam == Type_Handle)
-            min = reinterpret_cast<uintptr_t *>(footer->outVp());
-        else
+        if (exitFrame->isWrapperExit() && f->outParam == Type_Handle) {
+            switch (f->outParamRootType) {
+              case VMFunction::RootNone:
+                JS_NOT_REACHED("Handle outparam must have root type");
+                break;
+              case VMFunction::RootObject:
+              case VMFunction::RootString:
+              case VMFunction::RootPropertyName:
+              case VMFunction::RootFunction:
+              case VMFunction::RootCell:
+                // These are all handles to GCThing pointers.
+                min = reinterpret_cast<uintptr_t *>(footer->outParam<void *>());
+                break;
+              case VMFunction::RootValue:
+                min = reinterpret_cast<uintptr_t *>(footer->outParam<Value>());
+                break;
+            }
+        } else {
             min = reinterpret_cast<uintptr_t *>(footer);
+        }
     }
 
     while (!frames.done())
@@ -925,8 +943,29 @@ MarkIonExitFrame(JSTracer *trc, const IonFrameIterator &frame)
         }
     }
 
-    if (f->outParam == Type_Handle)
-        gc::MarkValueRoot(trc, footer->outVp(), "ion-vm-outvp");
+    if (f->outParam == Type_Handle) {
+        switch (f->outParamRootType) {
+          case VMFunction::RootNone:
+            JS_NOT_REACHED("Handle outparam must have root type");
+            break;
+          case VMFunction::RootObject:
+            gc::MarkObjectRoot(trc, footer->outParam<JSObject *>(), "ion-vm-out");
+            break;
+          case VMFunction::RootString:
+          case VMFunction::RootPropertyName:
+            gc::MarkStringRoot(trc, footer->outParam<JSString *>(), "ion-vm-out");
+            break;
+          case VMFunction::RootFunction:
+            gc::MarkObjectRoot(trc, footer->outParam<JSFunction *>(), "ion-vm-out");
+            break;
+          case VMFunction::RootValue:
+            gc::MarkValueRoot(trc, footer->outParam<Value>(), "ion-vm-outvp");
+            break;
+          case VMFunction::RootCell:
+            gc::MarkGCThingRoot(trc, footer->outParam<void *>(), "ion-vm-out");
+            break;
+        }
+    }
 }
 
 static void

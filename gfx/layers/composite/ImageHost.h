@@ -40,6 +40,7 @@ protected:
 class ImageHostSingle : public ImageHost
 {
 public:
+  using CompositableHost::EnsureTextureHost;
   ImageHostSingle(const TextureInfo& aTextureInfo)
     : ImageHost(aTextureInfo)
     , mTextureHost(nullptr)
@@ -78,7 +79,10 @@ public:
 
   virtual LayerRenderState GetRenderState() MOZ_OVERRIDE
   {
-    return mTextureHost->GetRenderState();
+    if (mTextureHost) {
+      return mTextureHost->GetRenderState();
+    }
+    return LayerRenderState();
   }
 
   virtual void SetCompositor(Compositor* aCompositor) MOZ_OVERRIDE;

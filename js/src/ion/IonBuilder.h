@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef jsion_bytecode_analyzer_h__
+#if !defined(jsion_bytecode_analyzer_h__) && defined(JS_ION)
 #define jsion_bytecode_analyzer_h__
 
 // This file declares the data structures for building a MIRGraph from a
@@ -464,6 +464,7 @@ class IonBuilder : public MIRGenerator
     InliningStatus inlineMathFloor(CallInfo &callInfo);
     InliningStatus inlineMathRound(CallInfo &callInfo);
     InliningStatus inlineMathSqrt(CallInfo &callInfo);
+    InliningStatus inlineMathAtan2(CallInfo &callInfo);
     InliningStatus inlineMathMinMax(CallInfo &callInfo, bool max);
     InliningStatus inlineMathPow(CallInfo &callInfo);
     InliningStatus inlineMathRandom(CallInfo &callInfo);

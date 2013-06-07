@@ -781,6 +781,12 @@ template bool
 js::XDRScript(XDRState<XDR_DECODE> *, HandleObject, HandleScript, HandleFunction,
               MutableHandleScript);
 
+js::ScriptSourceObject *
+JSScript::sourceObject() const
+{
+    return &sourceObject_->asScriptSource();
+}
+
 bool
 JSScript::initScriptCounts(JSContext *cx)
 {
@@ -1156,12 +1162,6 @@ ScriptSource::adjustDataSize(size_t nbytes)
         js_free(data.compressed);
     data.compressed = static_cast<unsigned char *>(buf);
     return !!data.compressed;
-}
-
-void
-JSScript::setSourceObject(js::ScriptSourceObject *sourceObject)
-{
-    sourceObject_ = sourceObject;
 }
 
 /* static */ bool
@@ -1723,7 +1723,7 @@ JSScript::Create(JSContext *cx, HandleObject enclosingScope, bool savedCallerFun
     }
     script->staticLevel = uint16_t(staticLevel);
 
-    script->setSourceObject(sourceObject);
+    script->sourceObject_ = sourceObject;
     script->sourceStart = bufStart;
     script->sourceEnd = bufEnd;
 
@@ -2311,18 +2311,23 @@ js::CloneScript(JSContext *cx, HandleObject enclosingScope, HandleFunction fun, 
                 clone = CloneStaticBlockObject(cx, enclosingScope, innerBlock);
             } else if (obj->isFunction()) {
                 RootedFunction innerFun(cx, obj->toFunction());
-                if (!innerFun->getOrCreateScript(cx))
-                    return NULL;
-                RootedObject staticScope(cx, innerFun->nonLazyScript()->enclosingStaticScope());
-                StaticScopeIter ssi(cx, staticScope);
-                RootedObject enclosingScope(cx);
-                if (!ssi.done() && ssi.type() == StaticScopeIter::BLOCK)
-                    enclosingScope = objects[FindBlockIndex(src, ssi.block())];
-                else
-                    enclosingScope = fun;
+                if (innerFun->isNative()) {
+                    assertSameCompartment(cx, innerFun);
+                    clone = innerFun;
+                } else {
+                    if (!innerFun->getOrCreateScript(cx))
+                        return NULL;
+                    RootedObject staticScope(cx, innerFun->nonLazyScript()->enclosingStaticScope());
+                    StaticScopeIter ssi(cx, staticScope);
+                    RootedObject enclosingScope(cx);
+                    if (!ssi.done() && ssi.type() == StaticScopeIter::BLOCK)
+                        enclosingScope = objects[FindBlockIndex(src, ssi.block())];
+                    else
+                        enclosingScope = fun;
 
-                clone = CloneInterpretedFunction(cx, enclosingScope, innerFun,
-                                                 src->selfHosted ? TenuredObject : newKind);
+                    clone = CloneInterpretedFunction(cx, enclosingScope, innerFun,
+                            src->selfHosted ? TenuredObject : newKind);
+                }
             } else {
                 /*
                  * Clone object literals emitted for the JSOP_NEWOBJECT opcode. We only emit that
